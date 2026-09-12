@@ -102,4 +102,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh release upload "${GITHUB_REF_NAME}" "VK-Archive-${{ matrix.name }}.zip" --clobber || gh release create "${GITHUB_REF_NAME}" "VK-Archive-${{ matrix.name }}.zip" --title "VK Archive ${GITHUB_REF_NAME}" --notes "Standalone apps. macOS: unzip, double-click VK Archive.app (System Settings > Privacy & Security > Open Anyway the first time). Windows: unzip, double-click VK Archive.bat (More info > Run anyway if SmartScreen asks)."
+        run: |
+          NOTES='Standalone apps. macOS: unzip, double-click "VK Archive.app" (System Settings > Privacy & Security > Open Anyway the first time). Windows: unzip, double-click "VK Archive.bat" (More info > Run anyway if SmartScreen asks).'
+          gh release upload "${GITHUB_REF_NAME}" "VK-Archive-${{ matrix.name }}.zip" --clobber \
+            || gh release create "${GITHUB_REF_NAME}" "VK-Archive-${{ matrix.name }}.zip" --title "VK Archive ${GITHUB_REF_NAME}" --notes "$NOTES"
