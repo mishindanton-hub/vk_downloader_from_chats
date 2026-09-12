@@ -38,9 +38,22 @@ allowed to read messages, and that is a one-time, two-minute step described belo
    named `vk_downloader_from_chats-...`. Move it somewhere with plenty of free space
    (the archive is saved inside it and photos and videos add up).
 3. **Start it.** Inside the folder, double-click `Start VK Archive.command`.
-   The first time macOS may say the file "cannot be opened because it is from an
-   unidentified developer": right-click (or Control-click) the file, choose **Open**,
-   then **Open** again in the dialog. A Terminal window appears.
+   The first time macOS blocks it, because the file was downloaded from the internet
+   and is not signed by Apple. Which dialog you get depends on your macOS version:
+   - *"Apple could not verify ... is free of malware"* with **Done** / **Move to Bin**
+     (macOS 15 Sequoia and newer): click **Done**. Open **System Settings**, go to
+     **Privacy & Security**, scroll down to the **Security** section. It says
+     `"Start VK Archive.command" was blocked to protect your Mac`; click
+     **Open Anyway** next to it, enter your Mac password, and click **Open Anyway**
+     again in the confirmation. Now double-click the file again. This is needed once.
+   - *"cannot be opened because it is from an unidentified developer"* (older macOS):
+     right-click (or Control-click) the file, choose **Open**, then **Open** again.
+
+   A Terminal window appears. If none of that works, you can skip the launcher
+   entirely: open **Terminal** (Spotlight: press Cmd+Space, type `Terminal`), type
+   `cd ` (with a space), drag the unpacked folder from Finder into the Terminal
+   window, press Enter, and then run the three commands from the Quick start section
+   below (`auth`, `whoami`, `run`).
 4. **Log in once.** The window prints a long `https://oauth.vk.com/authorize?...` link.
    Copy it into your browser (where you are already logged in to VK) and press
    **Allow**. You land on a blank page. Copy the whole address from the browser's
