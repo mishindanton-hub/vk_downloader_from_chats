@@ -41,6 +41,7 @@ export class VkApi {
     userAgent,
     minInterval = 340,
     maxRetries = 6,
+    timeoutMs = 20000,
     log = console,
     captchaSolver,
     fetchImpl = globalThis.fetch,
@@ -56,6 +57,8 @@ export class VkApi {
     this.userAgent = userAgent;
     this.minInterval = minInterval;
     this.maxRetries = maxRetries;
+    this.timeoutMs = timeoutMs;
+    this._redirects = 0;
     this.log = log;
     this.captchaSolver = captchaSolver ?? defaultCaptchaSolver;
     this.fetch = fetchImpl;
@@ -88,6 +91,14 @@ export class VkApi {
       try {
         body = await this._request(method, { ...params, ...extra });
       } catch (err) {
+        // VK answered with a redirect to another host (vk.com -> vk.ru): follow it and re-POST.
+        if (err.redirectBase) {
+          if (this._redirects++ >= 3) throw new Error(`Too many redirects from ${this.baseUrl}`);
+          this.log.warn(`${method}: ${this.baseUrl} redirects to ${err.redirectBase}; switching`);
+          this.altBases = this.altBases.filter((b) => b !== err.redirectBase);
+          this.baseUrl = err.redirectBase;
+          continue;
+        }
         // Network-level failure. First try the alternative API host (vk.com <-> vk.ru).
         if (this.altBases.length) {
           const next = this.altBases.shift();
@@ -139,14 +150,23 @@ export class VkApi {
     const headers = { 'content-type': 'application/x-www-form-urlencoded' };
     if (this.userAgent) headers['user-agent'] = this.userAgent;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60000);
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const res = await this.fetch(`${this.baseUrl}${method}`, {
         method: 'POST',
         headers,
         body: form.toString(),
         signal: controller.signal,
+        // Follow cross-host redirects ourselves: an automatic 301/302 would turn the POST into a GET and drop the token.
+        redirect: 'manual',
       });
+      const location = res.headers?.get?.('location');
+      if (res.status >= 300 && res.status < 400 && location) {
+        const target = new URL(location, `${this.baseUrl}${method}`);
+        const err = new Error(`HTTP ${res.status} redirect to ${target.origin}`);
+        err.redirectBase = `${target.origin}/method/`;
+        throw err;
+      }
       const text = await res.text();
       try {
         return JSON.parse(text);

@@ -24,6 +24,6 @@ export function resolveToken(flagToken) {
   if (flagToken) return { token: flagToken, source: '--token' };
   if (process.env.VK_TOKEN) return { token: process.env.VK_TOKEN, source: 'VK_TOKEN env' };
   const cfg = loadConfig();
-  if (cfg.access_token) return { token: cfg.access_token, source: CONFIG_FILE, app: cfg.app };
+  if (cfg.access_token) return { token: cfg.access_token, source: CONFIG_FILE, app: cfg.app, domain: cfg.domain };
   return { token: null };
 }

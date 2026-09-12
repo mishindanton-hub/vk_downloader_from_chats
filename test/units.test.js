@@ -17,8 +17,10 @@ describe('auth helpers', () => {
 
   it('parses the redirect URL, a bare fragment and a bare token', () => {
     const tok = 'vk1.a.' + 'x'.repeat(80);
-    assert.deepEqual(parseTokenInput(`https://oauth.vk.com/blank.html#access_token=${tok}&expires_in=0&user_id=42`), { access_token: tok, user_id: 42, expires_in: 0 });
+    assert.deepEqual(parseTokenInput(`https://oauth.vk.com/blank.html#access_token=${tok}&expires_in=0&user_id=42`), { access_token: tok, user_id: 42, expires_in: 0, domain: 'vk.com' });
+    assert.equal(parseTokenInput(`https://oauth.vk.ru/blank.html#access_token=${tok}&expires_in=0&user_id=42`).domain, 'vk.ru', 'remembers that VK sent us to vk.ru');
     assert.equal(parseTokenInput(`access_token=${tok}&user_id=1`).access_token, tok);
+    assert.equal(parseTokenInput(`access_token=${tok}&user_id=1`).domain, undefined);
     assert.equal(parseTokenInput(`  ${tok}\n`).access_token, tok);
     assert.throws(() => parseTokenInput('https://oauth.vk.com/blank.html#error=access_denied&error_description=User%20denied'), /access_denied/);
     assert.throws(() => parseTokenInput('hello'), /Could not recognise/);
@@ -82,6 +84,37 @@ describe('VkApi host fallback', () => {
     const res2 = await api.call('users.get');
     assert.deepEqual(res2, [{ id: 1 }]);
     assert.equal(seen.length, 3, 'stays on the working host afterwards');
+  });
+
+  it('follows a cross-host redirect by re-POSTing to the new host', async () => {
+    const seen = [];
+    const fetchImpl = async (url, init) => {
+      seen.push({ url, method: init.method, redirect: init.redirect });
+      if (url.startsWith('https://api.vk.com/')) {
+        return { status: 301, headers: new Headers({ location: url.replace('api.vk.com', 'api.vk.ru') }), text: async () => '' };
+      }
+      return { status: 200, headers: new Headers(), text: async () => JSON.stringify({ response: [{ id: 7 }] }) };
+    };
+    const api = new VkApi({ token: 't', fetchImpl, minInterval: 0, log: { warn() {}, debug() {}, info() {} } });
+    assert.deepEqual(await api.call('users.get'), [{ id: 7 }]);
+    assert.equal(seen[0].redirect, 'manual');
+    assert.equal(seen[1].url, 'https://api.vk.ru/method/users.get');
+    assert.equal(seen[1].method, 'POST', 'the token must not be lost to a GET');
+    await api.call('users.get');
+    assert.equal(seen.length, 3, 'stays on the redirected host');
+    assert.equal(api.baseUrl, 'https://api.vk.ru/method/');
+  });
+
+  it('starts on the configured domain and falls back to the other', async () => {
+    const seen = [];
+    const fetchImpl = async (url) => {
+      seen.push(url);
+      return { status: 200, headers: new Headers(), text: async () => JSON.stringify({ response: 1 }) };
+    };
+    const api = new VkApi({ token: 't', domain: 'vk.ru', fetchImpl, minInterval: 0 });
+    await api.call('users.get');
+    assert.equal(seen[0], 'https://api.vk.ru/method/users.get');
+    assert.deepEqual(api.altBases, ['https://api.vk.com/method/']);
   });
 
   it('builds vk.ru auth URLs when asked', () => {

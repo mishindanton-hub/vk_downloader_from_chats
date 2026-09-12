@@ -70,10 +70,14 @@ export function parseTokenInput(input) {
     const p = new URLSearchParams(fragment);
     const token = p.get('access_token');
     if (!token) throw new Error('No access_token found in the pasted URL');
+    // The host we actually landed on (oauth.vk.ru vs oauth.vk.com) tells us which
+    // domain works from this network; the API client should start there.
+    const host = /^https?:\/\/[^/]*?(vk\.(?:com|ru))(?:[/#?]|$)/i.exec(s);
     return {
       access_token: token,
       user_id: p.get('user_id') ? Number(p.get('user_id')) : undefined,
       expires_in: p.get('expires_in') ? Number(p.get('expires_in')) : undefined,
+      domain: host ? host[1].toLowerCase() : undefined,
     };
   }
   if (fragment.includes('error=')) {

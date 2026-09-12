@@ -80,6 +80,7 @@ export async function main(argv) {
 
   const api = makeApi(o, log);
   if (cmd === 'whoami') {
+    log.info(`Checking the token at ${api.baseUrl} ...`);
     const [me] = await api.call('users.get', { fields: 'screen_name' });
     log.info(`Token works. You are ${me.first_name} ${me.last_name} (id${me.id}${me.screen_name ? `, @${me.screen_name}` : ''}).`);
     return 0;
@@ -123,7 +124,7 @@ export async function main(argv) {
 }
 
 function makeApi(o, log) {
-  const { token, source, app } = resolveToken(o.token);
+  const { token, source, app, domain } = resolveToken(o.token);
   if (!token) {
     throw new Error(`No access token. Run "vk-archive auth" first (or pass --token / set VK_TOKEN).`);
   }
@@ -132,7 +133,7 @@ function makeApi(o, log) {
   return new VkApi({
     token,
     version: o['api-version'] ?? '5.131',
-    domain: o.domain ?? process.env.VK_DOMAIN ?? 'vk.com',
+    domain: o.domain ?? process.env.VK_DOMAIN ?? domain ?? 'vk.com',
     baseUrl: o['api-base'] ?? process.env.VK_API_BASE,
     userAgent: appInfo?.userAgent,
     log,
@@ -154,8 +155,17 @@ async function cmdAuth(o, log) {
   rl.close();
   const parsed = parseTokenInput(answer);
   const cfg = loadConfig();
-  Object.assign(cfg, { access_token: parsed.access_token, user_id: parsed.user_id, app: appId ? undefined : app, app_id: appId ?? APPS[app].id, saved_at: new Date().toISOString() });
+  const savedDomain = parsed.domain ?? domain;
+  Object.assign(cfg, {
+    access_token: parsed.access_token,
+    user_id: parsed.user_id,
+    app: appId ? undefined : app,
+    app_id: appId ?? APPS[app].id,
+    domain: savedDomain,
+    saved_at: new Date().toISOString(),
+  });
   saveConfig(cfg);
+  if (savedDomain !== domain) log.info(`\nVK sent you to ${savedDomain}, so the API will be used at api.${savedDomain}.`);
   log.info(`\nToken saved to ${CONFIG_FILE}. Now run: vk-archive whoami`);
   return 0;
 }

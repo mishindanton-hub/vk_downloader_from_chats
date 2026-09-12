@@ -75,8 +75,12 @@ cd ~/Downloads/vk_downloader_from_chats-*    # wherever you put the folder
 node bin/vk-archive.js auth --domain vk.ru
 ```
 
-The API calls themselves switch between `api.vk.com` and `api.vk.ru` automatically if
-one of them is unreachable.
+If the login link opened on `vk.com` but the blank page you copied is on `oauth.vk.ru`,
+nothing extra is needed: the tool remembers that VK sent you to `vk.ru` and talks to
+`api.vk.ru` from then on. The API calls also follow redirects and switch between
+`api.vk.com` and `api.vk.ru` automatically if one of them does not answer within
+20 seconds, so a pause of up to a minute right after "Token saved" is normal.
+To force a host explicitly, add `--domain vk.ru` (or `vk.com`) to any command.
 
 ## Quick start (Terminal)
 

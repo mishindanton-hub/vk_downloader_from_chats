@@ -30,6 +30,7 @@ if [ ! -f "$CONFIG" ]; then
 fi
 
 echo
+echo "Checking that the token works (contacting VK; if one host is blocked this can take up to a minute)..."
 node bin/vk-archive.js whoami || {
   echo
   echo "The saved token does not work. Delete $CONFIG and run this again to log in afresh."
