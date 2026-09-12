@@ -46,7 +46,7 @@ describe('easy flow: export files in Downloads -> import -> offline archive', ()
     };
     const sandbox = { window: { vkApi: { api }, __vkArchiveSave: (name, text) => fs.writeFileSync(path.join(downloads, name), text) }, console: { log() {}, error() {} }, setTimeout };
     sandbox.globalThis = sandbox;
-    await vm.runInNewContext(SCRIPT.replace('chatsPerFile: 40,', 'chatsPerFile: 3,').replace('pauseMs: 350,', 'pauseMs: 0,'), sandbox);
+    await vm.runInNewContext(SCRIPT.replace('chatsPerFile: 10,', 'chatsPerFile: 3,').replace('pauseMs: 350,', 'pauseMs: 0,'), sandbox);
     fs.writeFileSync(path.join(downloads, 'vk-export-999.json'), '{"not":"ours"}');
     assert.equal(fs.readdirSync(downloads).filter((n) => n.startsWith('vk-export-')).length, 3);
 

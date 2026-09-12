@@ -12,8 +12,8 @@
 const SETTINGS = {
   startFrom: 0,        // skip this many conversations (to resume after closing the tab)
   onlyPeers: [],       // e.g. [123456, 2000000001] to export just these peer ids
-  chatsPerFile: 40,    // how many conversations to put into one downloaded file
-  maxFileMB: 80,       // ...or fewer, if the file would get bigger than this
+  chatsPerFile: 10,    // how many conversations to put into one downloaded file
+  maxFileMB: 60,       // ...or fewer, if the file would get bigger than this
   apiVersion: '5.199',
   pauseMs: 350,        // pause between API calls (VK allows ~3 per second)
 };
@@ -210,6 +210,8 @@ const SETTINGS = {
     if (chats.length >= SETTINGS.chatsPerFile || approxBytes > SETTINGS.maxFileMB * 1024 * 1024) {
       await flush(false);
       log(`If the tab closes, set startFrom: ${i + 1} in SETTINGS to continue from here.`);
+    } else {
+      log(`${chats.length} chat(s) waiting to be saved (${(approxBytes / 1048576).toFixed(1)} MB); next file after ${SETTINGS.chatsPerFile - chats.length} more chat(s) or at ${SETTINGS.maxFileMB} MB.`);
     }
   }
   await flush(true);

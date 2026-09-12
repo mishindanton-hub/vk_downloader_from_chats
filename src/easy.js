@@ -115,7 +115,7 @@ arrived so far. Ctrl+C quits (run again later; nothing is lost).
         if (data.done) done = true;
       }
       if (!done && Date.now() - lastNote > 30000) {
-        say(`  ... waiting for export files in ${downloads} (${partsSeen} received so far). Press Enter to continue without waiting.`);
+        say(`  ... waiting for export files in ${downloads} (${partsSeen} received so far). The browser saves one file per 10 chats; big chats take minutes each. Press Enter to continue without waiting.`);
         lastNote = Date.now();
       }
       if (!done) await sleep(2000);

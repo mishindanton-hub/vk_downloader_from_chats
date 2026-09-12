@@ -41,7 +41,7 @@ describe('browser export -> import -> run --offline', () => {
     };
     sandbox.globalThis = sandbox;
     // Small parts so the multi-file path is exercised.
-    const script = SCRIPT.replace('chatsPerFile: 40,', 'chatsPerFile: 2,').replace('pauseMs: 350,', 'pauseMs: 0,');
+    const script = SCRIPT.replace('chatsPerFile: 10,', 'chatsPerFile: 2,').replace('pauseMs: 350,', 'pauseMs: 0,');
     const result = await vm.runInNewContext(script, sandbox, { filename: 'browser-export.js' });
     assert.equal(result.conversations, 5);
     assert.equal(result.parts, 3);
