@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { runArchive } from './archive.js';
 import { loadConfig, saveConfig } from './config.js';
 import { importExport } from './import.js';
-import { ensureDir, readJson, sleep, writeJson } from './util.js';
+import { activity, ensureDir, readJson, sleep, startHeartbeat, writeJson } from './util.js';
 
 const BROWSER_SCRIPT = fileURLToPath(new URL('../browser-export.js', import.meta.url));
 const VK_URL = 'https://vk.ru/im';
@@ -109,7 +109,16 @@ arrived so far. Ctrl+C quits (run again later; nothing is lost).
           imported[key] = { ignored: true };
           continue;
         }
-        const res = importExport({ files: [file], out, log: quiet(log) });
+        say(`  importing ${name} (${(st.size / 1048576).toFixed(0)} MB) ...`);
+        activity.set(`importing ${name}`);
+        const stopHb = startHeartbeat(log);
+        let res;
+        try {
+          res = importExport({ files: [file], out, log: quiet(log) });
+        } finally {
+          stopHb();
+          activity.clear();
+        }
         partsSeen += 1;
         imported[key] = { imported_at: new Date().toISOString(), chats: res.chats, part: data.part, done: Boolean(data.done) };
         writeJson(trackerPath, imported);
@@ -145,6 +154,7 @@ arrived so far. Ctrl+C quits (run again later; nothing is lost).
 }
 
 function say(text) {
+  activity.lastOutput = Date.now();
   process.stdout.write(`${text}\n`);
 }
 

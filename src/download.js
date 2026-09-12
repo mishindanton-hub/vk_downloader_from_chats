@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ensureDir, formatBytes, mapLimit, readJson, sleep, writeJson } from './util.js';
+import { activity, ensureDir, formatBytes, mapLimit, readJson, sleep, writeJson } from './util.js';
 
 // 400 is deliberately not here: VK's video CDN answers 400 when the link's IP/browser binding
 // does not match, which a later run with the right identity can fix.
@@ -13,7 +13,16 @@ const PERMANENT = new Set([401, 403, 404, 410]);
  * - writes to `.part` then renames, so partial files are never mistaken for complete ones
  * - retries transient failures with backoff
  */
-export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed = false, fetchImpl = globalThis.fetch, onProgress, userAgent }) {
+/** Files currently being streamed, for the heartbeat: key -> { rel, bytes, expected }. */
+export const inFlight = new Map();
+
+export function describeInFlight() {
+  if (!inFlight.size) return '';
+  const parts = [...inFlight.values()].slice(0, 3).map((f) => `${path.basename(f.rel)} ${formatBytes(f.bytes)}${f.expected ? `/${formatBytes(f.expected)}` : ''}`);
+  return `[${inFlight.size} file${inFlight.size > 1 ? 's' : ''} in flight: ${parts.join(', ')}${inFlight.size > 3 ? ', …' : ''}]`;
+}
+
+export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed = false, fetchImpl = globalThis.fetch, onProgress, userAgent, label }) {
   const indexPath = path.join(dir, 'media-index.json');
   const index = readJson(indexPath, {}) ?? {};
   const stats = { done: 0, skipped: 0, failed: 0, bytes: 0, total: jobs.length };
@@ -49,9 +58,17 @@ export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed
     const urls = [job.url, ...(job.alternatives ?? [])];
     let firstErr = null;
     let ok = false;
+    if (label) activity.set(`downloading media for ${label}`);
     for (const [i, url] of urls.entries()) {
       try {
-        const size = await downloadFile(url, abs, { fetchImpl, userAgent });
+        const flight = { rel: job.rel, bytes: 0, expected: 0 };
+        inFlight.set(job.key, flight);
+        let size;
+        try {
+          size = await downloadFile(url, abs, { fetchImpl, userAgent, onBytes: (b, exp) => { flight.bytes = b; flight.expected = exp; } });
+        } finally {
+          inFlight.delete(job.key);
+        }
         stampDate(abs, job.date);
         index[job.key] = { status: 'ok', path: job.rel, kind: job.kind, size, url, title: job.title, msg_id: job.msg_id, ...(i ? { fallback: i } : {}) };
         stats.done += 1;
@@ -103,13 +120,13 @@ export class HttpError extends Error {
 }
 
 /** Stream a URL to disk with inactivity timeout and retries. Returns bytes written. */
-export async function downloadFile(url, dest, { fetchImpl = globalThis.fetch, retries = 3, inactivityMs = 60000, userAgent } = {}) {
+export async function downloadFile(url, dest, { fetchImpl = globalThis.fetch, retries = 3, inactivityMs = 60000, userAgent, onBytes } = {}) {
   ensureDir(path.dirname(dest));
   const part = `${dest}.part`;
   let attempt = 0;
   for (;;) {
     try {
-      const size = await streamToFile(url, part, { fetchImpl, inactivityMs, userAgent });
+      const size = await streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onBytes });
       fs.renameSync(part, dest);
       return size;
     } catch (err) {
@@ -125,7 +142,7 @@ export async function downloadFile(url, dest, { fetchImpl = globalThis.fetch, re
   }
 }
 
-async function streamToFile(url, part, { fetchImpl, inactivityMs, userAgent }) {
+async function streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onBytes }) {
   const controller = new AbortController();
   let timer = setTimeout(() => controller.abort(), inactivityMs);
   const bump = () => {
@@ -144,6 +161,7 @@ async function streamToFile(url, part, { fetchImpl, inactivityMs, userAgent }) {
       for await (const chunk of res.body) {
         bump();
         written += chunk.length;
+        onBytes?.(written, Number.isFinite(expected) ? expected : 0);
         if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
       }
     } finally {

@@ -1,20 +1,30 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { collectMedia, datedRel, pickVideoFile } from './attachments.js';
-import { downloadAll } from './download.js';
+import { describeInFlight, downloadAll } from './download.js';
 import { fetchHistory, readMessages } from './history.js';
 import { NameBook, listConversations, peerDir } from './peers.js';
 import { EXPORT_META, VIDEO_CACHE } from './import.js';
 import { renderIndexHtml, writeChatOutputs } from './render.js';
 import { writeStats } from './stats.js';
-import { ensureDir, extFromUrl, formatBytes, readJson, writeJson } from './util.js';
+import { activity, ensureDir, extFromUrl, formatBytes, readJson, startHeartbeat, writeJson } from './util.js';
 
 /**
  * The main loop: list every conversation, then for each one fetch the full
  * history, download all media, and render JSON/HTML/TXT. Everything is
  * resumable: re-running picks up where the previous run stopped.
  */
-export async function runArchive({ api, out, log, peerFilter, flags = {}, concurrency = 4, userAgent }) {
+export async function runArchive(opts) {
+  const stop = startHeartbeat(opts.log, { detail: describeInFlight });
+  try {
+    return await runArchiveInner(opts);
+  } finally {
+    stop();
+    activity.clear();
+  }
+}
+
+async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurrency = 4, userAgent }) {
   ensureDir(out);
   const namesPath = path.join(out, 'names.json');
   const names = NameBook.fromJSON(readJson(namesPath, null));
@@ -95,6 +105,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
     if (offline) {
       log.info(`${tag}: history from browser export (${state.fetched} messages)`);
     } else {
+      activity.set(`fetching history of ${peer.title}`);
       try {
         let lastLog = 0;
         const res = await fetchHistory({
@@ -125,6 +136,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
     writeJson(namesPath, names.toJSON());
 
     // 2. collect + resolve media (video URLs come from video.get)
+    activity.set(`reading messages of ${peer.title}`);
     const messages = readMessages(path.join(dir, 'messages.jsonl'));
     entry.message_count = messages.length;
     const media = collectMedia(messages, {
@@ -169,6 +181,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
         concurrency,
         log,
         userAgent,
+        label: peer.title,
         retryFailed: flags.retryFailed,
         onProgress: (s) => {
           if (Date.now() - lastLog > 5000) {
@@ -180,6 +193,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
       if (jobs.length) log.info(`${tag}: media done: ${stats.done} downloaded, ${stats.skipped} already present, ${stats.failed} failed, ${formatBytes(stats.bytes)}`);
       entry.media_ok = Object.values(index).filter((r) => r.status === 'ok').length;
       entry.media_failed = Object.values(index).filter((r) => r.status === 'failed').length;
+      activity.set(`building the pages of ${peer.title} (${messages.length} messages)`);
       writeChatOutputs({ dir, peer, messages, names, index, me: me.id, videoLinks, links: media.links });
       writeJson(path.join(dir, 'state.json'), { ...state, media_complete: stats.failed === 0, media_updated_at: new Date().toISOString(), videos_not_downloaded: videoLinks.length });
       entry.status = 'ok';
@@ -189,6 +203,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
   }
   await pendingDownload;
   writeIndex(out, summary, me);
+  activity.set('computing messaging statistics over all chats');
   writeStats(out, log);
   log.info(`\nDone. ${summary.length} chats.${offline ? '' : ` API calls: ${api.stats.calls} (${api.stats.retries} retries).`} Open ${path.join(out, 'index.html')}`);
   return summary;
@@ -205,6 +220,7 @@ function prerenderPages(out, peers, names, me, log) {
   let lastLog = 0;
   for (const [i, peer] of todo.entries()) {
     const dir = peerDir(out, peer);
+    activity.set(`building pages: ${peer.title} (${i + 1}/${todo.length})`);
     const messages = readMessages(path.join(dir, 'messages.jsonl'));
     const index = readJson(path.join(dir, 'media-index.json'), {}) ?? {};
     writeChatOutputs({ dir, peer, messages, names, index, me: me.id, videoLinks: [], links: [] });

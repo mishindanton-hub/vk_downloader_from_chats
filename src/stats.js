@@ -3,7 +3,7 @@ import path from 'node:path';
 import { readMessages } from './history.js';
 import { NameBook } from './peers.js';
 import { CSS } from './render.js';
-import { escapeHtml, formatDay, readJson } from './util.js';
+import { activity, escapeHtml, formatDay, readJson } from './util.js';
 
 const ATT_LABELS = { photo: 'Photos', video: 'Videos', audio_message: 'Voice messages', doc: 'Documents', sticker: 'Stickers', audio: 'Music', link: 'Links', wall: 'Reposts', gift: 'Gifts', graffiti: 'Graffiti' };
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -42,6 +42,7 @@ export function computeStats(out) {
     if (!fs.statSync(dir).isDirectory()) continue;
     const state = readJson(path.join(dir, 'state.json'), null);
     if (!state?.peer_id || !fs.existsSync(path.join(dir, 'messages.jsonl'))) continue;
+    activity.set(`computing statistics: ${d}`);
     const messages = readMessages(path.join(dir, 'messages.jsonl'));
     if (!messages.length) continue;
     const c = {

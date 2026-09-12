@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { VkApi } from '../src/api.js';
-import { downloadAll } from '../src/download.js';
+import { describeInFlight, downloadAll } from '../src/download.js';
 import { bestPhotoUrl, collectMedia, pickVideoFile } from '../src/attachments.js';
 import { buildAuthUrl, parseTokenInput } from '../src/auth.js';
 import { formatText } from '../src/render.js';
-import { sanitizeName } from '../src/util.js';
+import { activity, sanitizeName, sleep, startHeartbeat } from '../src/util.js';
 
 describe('auth helpers', () => {
   it('builds a Kate Mobile implicit-flow URL', () => {
@@ -145,6 +145,36 @@ describe('media naming', () => {
     assert.ok(!fs.existsSync(path.join(dir, 'media/photos/photo1_1.jpg')));
     assert.equal(Math.floor(fs.statSync(path.join(dir, 'media/photos/2020-01-02_photo1_1.jpg')).mtimeMs / 1000), 1577923200);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'media-index.json'), 'utf8')).photo1_1.path, 'media/photos/2020-01-02_photo1_1.jpg');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('heartbeat', () => {
+  it('prints what it is doing, with bytes in flight, when the output has been quiet', async () => {
+    const lines = [];
+    const log = { info: (l) => lines.push(l), warn() {} };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-hb-'));
+    // A fetch that trickles a 3-chunk body slowly, like a big video on a slow line.
+    const fetchImpl = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-length': '30' }),
+      body: (async function* () {
+        for (let i = 0; i < 3; i += 1) {
+          await sleep(60);
+          yield Buffer.alloc(10, 1);
+        }
+      })(),
+    });
+    activity.lastOutput = Date.now() - 10000;
+    const stop = startHeartbeat(log, { quietMs: 40, detail: describeInFlight });
+    try {
+      await downloadAll([{ key: 'video1_1', kind: 'video', url: 'http://x/v.mp4', rel: 'media/videos/2020-01-01_video1_1_720p.mp4', date: 1577836800 }], { dir, log, fetchImpl, label: 'Big chat' });
+    } finally {
+      stop();
+      activity.clear();
+    }
+    assert.ok(lines.some((l) => /still working: downloading media for Big chat \[1 file in flight: 2020-01-01_video1_1_720p\.mp4 \d+ B\/30 B\]/.test(l)), lines.join('\n'));
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
