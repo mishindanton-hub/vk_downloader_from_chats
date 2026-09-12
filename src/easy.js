@@ -137,7 +137,7 @@ arrived so far. Ctrl+C quits (run again later; nothing is lost).
   const ok = summary.filter((s) => s.status === 'ok').length;
   const failed = summary.reduce((n, s) => n + (s.media_failed ?? 0), 0);
   const index = path.join(out, 'index.html');
-  say(`\nDone: ${ok} chats archived${failed ? `, ${failed} media files could not be downloaded (VK no longer serves them)` : ''}.\nOpen ${index} in any browser.`);
+  say(`\nDone: ${ok} chats archived${failed ? `, ${failed} media files could not be downloaded (VK no longer serves them)` : ''}.\nOpen ${index} in any browser. Messaging statistics are in ${path.join(out, 'stats.html')}.`);
   openInBrowser(index);
   return 0;
 }

@@ -6,6 +6,7 @@ import { fetchHistory, readMessages } from './history.js';
 import { NameBook, listConversations, peerDir } from './peers.js';
 import { VIDEO_CACHE } from './import.js';
 import { renderIndexHtml, writeChatOutputs } from './render.js';
+import { writeStats } from './stats.js';
 import { ensureDir, extFromUrl, formatBytes, readJson, writeJson } from './util.js';
 
 /**
@@ -179,6 +180,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
   }
   await pendingDownload;
   writeIndex(out, summary, me);
+  writeStats(out, log);
   log.info(`\nDone. ${summary.length} chats.${offline ? '' : ` API calls: ${api.stats.calls} (${api.stats.retries} retries).`} Open ${path.join(out, 'index.html')}`);
   return summary;
 }
@@ -263,5 +265,6 @@ export function rerender({ out, log }) {
     log.info(`rendered ${d} (${messages.length} messages)`);
   }
   writeIndex(out, summary, me);
+  writeStats(out, log);
   return summary;
 }

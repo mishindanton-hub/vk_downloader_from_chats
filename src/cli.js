@@ -11,6 +11,7 @@ import { CONFIG_FILE, loadConfig, resolveToken, saveConfig } from './config.js';
 import { runEasy } from './easy.js';
 import { importExport } from './import.js';
 import { NameBook, listConversations } from './peers.js';
+import { writeStats } from './stats.js';
 import { formatDate, makeLogger, sleep } from './util.js';
 
 const HELP = `vk-archive: offload all your VK conversations (text + media) to disk.
@@ -33,6 +34,8 @@ Usage:
         Archive everything (resumable; re-run to continue or to pick up new media).
   vk-archive render [--out DIR]
         Rebuild HTML/JSON/TXT from already-downloaded data, no network needed.
+  vk-archive stats [--out DIR]
+        Compute messaging statistics (who, how many, when) into stats.html / stats.json.
 
 Without a token (browser route, when VK refuses the token):
   vk-archive browser
@@ -102,6 +105,10 @@ export async function main(argv) {
   if (cmd === 'diagnose') return cmdDiagnose(o, log);
   if (cmd === 'render') {
     rerender({ out: path.resolve(o.out ?? 'vk-archive'), log });
+    return 0;
+  }
+  if (cmd === 'stats') {
+    writeStats(path.resolve(o.out ?? loadConfig().out ?? 'vk-archive'), log);
     return 0;
   }
   if (cmd === 'browser') return cmdBrowser(log);

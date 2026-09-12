@@ -12,6 +12,8 @@ account needed.
 - Polite: stays under VK's rate limit and retries transient errors automatically.
 - Output per chat: `messages.json` (raw API data), `messages.html` (browsable, works offline),
   `messages.txt` (plain text), and `media/` with the original files.
+- `stats.html`: messaging statistics (who you talk to most, sent vs received, per year,
+  time of day, streaks, attachments), computed from the archive, works offline.
 
 ## Why the API and not a Chrome extension?
 
@@ -180,6 +182,10 @@ scratch (for example because new messages arrived), delete its `state.json` and
 `node bin/vk-archive.js render` rebuilds the HTML/JSON/TXT from data already on disk
 without any network access (useful after editing the templates).
 
+`node bin/vk-archive.js stats` recomputes `stats.html` and `stats.json` from the archive
+(also done automatically at the end of every run). It works as soon as the messages are
+imported, before any media is downloaded.
+
 `node bin/vk-archive.js import FILE...` loads `vk-export-*.json` files produced by
 `browser-export.js` (the launcher flow) into the same layout, and `run --offline` then does the
 media stage without a single API call. The two routes can be mixed: an imported chat is
@@ -190,6 +196,7 @@ simply a chat whose history is already complete.
 ```
 vk-archive/
   index.html                 list of all chats with counts and links
+  stats.html, stats.json     messaging statistics
   conversations.json         raw conversation list
   names.json                 every user/community seen, with names
   me.json, summary.json

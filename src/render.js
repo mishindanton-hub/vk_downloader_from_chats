@@ -200,7 +200,7 @@ function renderMessage(m, ctx, depth = 0) {
   return `<div class="msg${out ? ' out' : ''}${depth ? ' nested' : ''}" id="${depth ? '' : `m${m.id}`}">${parts.join('')}</div>`;
 }
 
-const CSS = `
+export const CSS = `
 :root{--bg:#f4f5f7;--card:#fff;--out:#e7f3ff;--txt:#111;--muted:#6b7280;--line:#e5e7eb;--link:#2a5885}
 @media (prefers-color-scheme:dark){:root{--bg:#111318;--card:#1b1e26;--out:#1e2a3d;--txt:#e5e7eb;--muted:#9aa3b2;--line:#2b303b;--link:#8ab4f8}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
@@ -298,7 +298,7 @@ export function renderIndexHtml(chats, me) {
     .join('\n');
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VK archive</title><style>${CSS}
 table{border-collapse:collapse;width:100%;background:var(--card);border-radius:12px;overflow:hidden}th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}td.n{text-align:right}th{font-size:13px;color:var(--muted)}.tag{font-size:11px;color:var(--muted)}.bad{color:#c0392b;font-size:12px}</style></head><body>
-<header><h1>VK archive${me ? ` of ${escapeHtml(`${me.first_name} ${me.last_name}`)}` : ''}</h1><div class="meta">${chats.length} chats · generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')}</div></header>
+<header><h1>VK archive${me ? ` of ${escapeHtml(`${me.first_name} ${me.last_name}`)}` : ''}</h1><div class="meta">${chats.length} chats · <a href="stats.html">messaging stats</a> · generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')}</div></header>
 <main><table><thead><tr><th>Chat</th><th>Type</th><th>Messages</th><th>Media</th><th>Last message</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></main>
 <footer>Exported with vk-chat-archiver</footer></body></html>`;
 }

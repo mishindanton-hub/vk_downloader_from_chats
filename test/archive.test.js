@@ -147,6 +147,21 @@ describe('end-to-end archive against a fake VK', () => {
     assert.equal(vk.state.filesServed, filesBefore + 1);
   });
 
+  it('computes messaging stats from the archived messages', () => {
+    const stats = JSON.parse(fs.readFileSync(path.join(out, 'stats.json'), 'utf8'));
+    assert.equal(stats.totals.messages, stats.chats.reduce((n, c) => n + c.total, 0));
+    const alice = stats.chats.find((c) => c.peer_id === 2);
+    assert.equal(alice.total, 450);
+    assert.equal(alice.sent, 225, 'every other message in the fixture is from me');
+    assert.ok(stats.years.length >= 1);
+    assert.equal(stats.hours.reduce((a, b) => a + b, 0), stats.totals.messages);
+    const html = fs.readFileSync(path.join(out, 'stats.html'), 'utf8');
+    assert.match(html, /Who you message most/);
+    assert.match(html, /Alice A/);
+    assert.match(html, /<svg/);
+    assert.match(fs.readFileSync(path.join(out, 'index.html'), 'utf8'), /stats\.html/);
+  });
+
   it('render command rebuilds outputs offline', () => {
     const htmlPath = path.join(out, dirOf(2), 'messages.html');
     fs.unlinkSync(htmlPath);
