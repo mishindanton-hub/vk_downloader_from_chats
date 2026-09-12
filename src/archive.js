@@ -77,6 +77,13 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
   if (offline) {
     hooks.phase?.('pages');
     prerenderPages(out, peers, names, me, log);
+    // Statistics only need the messages, which are all here already: compute them now
+    // (once per import) rather than only after the hours-long media download.
+    if (statsAreStale(out)) {
+      hooks.phase?.('stats');
+      activity.set('computing messaging statistics over all chats');
+      writeStats(out, log);
+    }
     hooks.phase?.('media');
   }
 
@@ -215,6 +222,18 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
   writeStats(out, log);
   log.info(`\nDone. ${summary.length} chats.${offline ? '' : ` API calls: ${api.stats.calls} (${api.stats.retries} retries).`} Open ${path.join(out, 'index.html')}`);
   return summary;
+}
+
+/** True when stats.html is missing or older than the last import of messages. */
+function statsAreStale(out) {
+  const statsPath = path.join(out, 'stats.html');
+  if (!fs.existsSync(statsPath)) return true;
+  const convPath = path.join(out, 'conversations.json');
+  try {
+    return fs.statSync(convPath).mtimeMs > fs.statSync(statsPath).mtimeMs;
+  } catch {
+    return true;
+  }
 }
 
 function prerenderPages(out, peers, names, me, log) {

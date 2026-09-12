@@ -92,6 +92,12 @@ describe('browser export -> import -> run --offline', () => {
     assert.equal(vk.state.lastFileUserAgent, 'TestBrowser/1.0');
   });
 
+  it('computes the statistics at the start of an offline run, before media', () => {
+    assert.ok(fs.existsSync(path.join(out, 'stats.html')));
+    const stats = JSON.parse(fs.readFileSync(path.join(out, 'stats.json'), 'utf8'));
+    assert.equal(stats.totals.chats, 4);
+  });
+
   it('renders the same outputs as the API route and names people from the export', () => {
     const dir = path.join(out, dirOf(2));
     const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
