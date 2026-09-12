@@ -24,6 +24,7 @@ export class VkApiError extends Error {
 // 917  you don't have access to this chat (kicked)
 // 924  can't forward these messages
 const RETRYABLE = new Set([1, 6, 9, 10, 29]);
+export const ALT_DOMAINS = ['vk.com', 'vk.ru'];
 
 /**
  * Minimal VK API client:
@@ -35,7 +36,8 @@ export class VkApi {
   constructor({
     token,
     version = '5.131',
-    baseUrl = 'https://api.vk.com/method/',
+    domain = 'vk.com',
+    baseUrl,
     userAgent,
     minInterval = 340,
     maxRetries = 6,
@@ -47,7 +49,10 @@ export class VkApi {
     if (!token) throw new Error('Access token is required');
     this.token = token;
     this.version = version;
-    this.baseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+    // VK serves the same API from api.vk.com and api.vk.ru; if one host is unreachable we switch to the other.
+    this.altBases = baseUrl ? [] : ALT_DOMAINS.filter((d) => d !== domain).map((d) => `https://api.${d}/method/`);
+    const base = baseUrl ?? `https://api.${domain}/method/`;
+    this.baseUrl = base.endsWith('/') ? base : `${base}/`;
     this.userAgent = userAgent;
     this.minInterval = minInterval;
     this.maxRetries = maxRetries;
@@ -83,7 +88,13 @@ export class VkApi {
       try {
         body = await this._request(method, { ...params, ...extra });
       } catch (err) {
-        // Network-level failure.
+        // Network-level failure. First try the alternative API host (vk.com <-> vk.ru).
+        if (this.altBases.length) {
+          const next = this.altBases.shift();
+          this.log.warn(`${method}: ${this.baseUrl} unreachable (${err.message}); switching to ${next}`);
+          this.baseUrl = next;
+          continue;
+        }
         if (attempt >= this.maxRetries) throw err;
         attempt += 1;
         this.stats.retries += 1;

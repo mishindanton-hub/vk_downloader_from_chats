@@ -40,19 +40,19 @@ export const SCOPE = ['messages', 'photos', 'video', 'docs', 'audio', 'wall', 'g
 
 export const REDIRECT_URI = 'https://oauth.vk.com/blank.html';
 
-export function buildAuthUrl({ app = 'kate', appId, apiVersion = '5.131', revoke = true } = {}) {
+export function buildAuthUrl({ app = 'kate', appId, apiVersion = '5.131', revoke = true, domain = 'vk.com' } = {}) {
   const clientId = appId ?? APPS[app]?.id;
   if (!clientId) throw new Error(`Unknown app "${app}". Known: ${Object.keys(APPS).join(', ')} (or pass --app-id).`);
   const params = new URLSearchParams({
     client_id: String(clientId),
     scope: SCOPE.join(','),
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: `https://oauth.${domain}/blank.html`,
     display: 'page',
     response_type: 'token',
     v: apiVersion,
   });
   if (revoke) params.set('revoke', '1');
-  return `https://oauth.vk.com/authorize?${params.toString()}`;
+  return `https://oauth.${domain}/authorize?${params.toString()}`;
 }
 
 /**
@@ -82,6 +82,6 @@ export function parseTokenInput(input) {
   }
   if (/^[a-zA-Z0-9._-]{40,}$/.test(s)) return { access_token: s };
   throw new Error(
-    'Could not recognise a token in the input. Paste the whole URL from the address bar (it starts with https://oauth.vk.com/blank.html#access_token=...).',
+    'Could not recognise a token in the input. Paste the whole URL from the address bar (it starts with https://oauth.vk.com/blank.html#access_token=... or https://oauth.vk.ru/blank.html#access_token=...).',
   );
 }

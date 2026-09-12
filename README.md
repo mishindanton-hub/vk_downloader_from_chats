@@ -29,7 +29,43 @@ The VK API gives you the same data as clean JSON with stable pagination, direct 
 full-size files, and a well-defined rate limit. The only hard part is getting a token that is
 allowed to read messages, and that is a one-time, two-minute step described below.
 
-## Quick start
+## Beginner guide (macOS, no programming needed)
+
+1. **Install Node.js.** Open https://nodejs.org, download the "LTS" installer for macOS,
+   open the downloaded `.pkg` and click through it. That is the only thing to install.
+2. **Get this folder onto your Mac.** On the GitHub page click the green **Code** button,
+   then **Download ZIP**. Double-click the ZIP in Downloads to unpack it. You get a folder
+   named `vk_downloader_from_chats-...`. Move it somewhere with plenty of free space
+   (the archive is saved inside it and photos and videos add up).
+3. **Start it.** Inside the folder, double-click `Start VK Archive.command`.
+   The first time macOS may say the file "cannot be opened because it is from an
+   unidentified developer": right-click (or Control-click) the file, choose **Open**,
+   then **Open** again in the dialog. A Terminal window appears.
+4. **Log in once.** The window prints a long `https://oauth.vk.com/authorize?...` link.
+   Copy it into your browser (where you are already logged in to VK) and press
+   **Allow**. You land on a blank page. Copy the whole address from the browser's
+   address bar (it starts with `https://oauth.vk.com/blank.html#access_token=`) and
+   paste it back into the Terminal window, then press Enter. The token is saved, so
+   you never do this again.
+5. **Wait.** The window shows progress chat by chat. You can close it whenever you like
+   and double-click the file again later; it continues where it stopped and never
+   downloads the same file twice.
+6. **Look at the result.** When it says "Done", open `vk-archive/index.html` inside the
+   folder in any browser. Every chat is listed with its messages, photos, voice
+   messages and videos, all working offline.
+
+If the login link does not open (VK has been moving from `vk.com` to `vk.ru`), run the
+tool once from Terminal with the other domain and then use the launcher as usual:
+
+```bash
+cd ~/Downloads/vk_downloader_from_chats-*    # wherever you put the folder
+node bin/vk-archive.js auth --domain vk.ru
+```
+
+The API calls themselves switch between `api.vk.com` and `api.vk.ru` automatically if
+one of them is unreachable.
+
+## Quick start (Terminal)
 
 ```bash
 git clone <this repo> && cd vk_downloader_from_chats
@@ -71,6 +107,7 @@ Revoke it afterwards at vk.com -> Settings -> Security -> Application access
 node bin/vk-archive.js run [options]
 
   --out DIR              output directory (default ./vk-archive)
+  --domain vk.com|vk.ru  VK host to use (default vk.com, automatic fallback to the other)
   --peer ID[,ID...]      only these peers (user id, -group id, or 2000000000+chat id)
   --text-only            fetch history only, no media
   --no-video --no-photos --no-docs --no-voice --no-stickers --no-music
@@ -89,9 +126,10 @@ node bin/vk-archive.js run --no-video           # then photos, voice, docs, stic
 node bin/vk-archive.js run --max-video-quality 720   # then videos
 ```
 
-Each run only adds what is missing. Running `run` again later picks up new messages in
-chats that changed, without touching the ones already complete (delete a chat's
-`state.json` to force a full re-fetch of that chat).
+Each run only adds what is missing: chats whose history is already complete are skipped,
+and media that is already on disk is not downloaded again. To re-fetch one chat from
+scratch (for example because new messages arrived), delete its `state.json` and
+`messages.jsonl` and run again.
 
 `node bin/vk-archive.js render` rebuilds the HTML/JSON/TXT from data already on disk
 without any network access (useful after editing the templates).

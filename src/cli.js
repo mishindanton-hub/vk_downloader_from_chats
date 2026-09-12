@@ -35,6 +35,7 @@ Options for run:
   --retry-failed         retry media that previously failed with 403/404
   --token TOKEN          use this token instead of the stored one (or VK_TOKEN env)
   --api-version V        VK API version (default 5.131)
+  --domain vk.com|vk.ru  which VK host to talk to (default vk.com, falls back to vk.ru automatically)
   -v, --verbose          chatty logging
 `;
 
@@ -46,6 +47,7 @@ const OPTIONS = {
   token: { type: 'string' },
   'api-version': { type: 'string' },
   'api-base': { type: 'string' },
+  domain: { type: 'string' },
   'max-video-quality': { type: 'string' },
   concurrency: { type: 'string' },
   'text-only': { type: 'boolean' },
@@ -130,7 +132,8 @@ function makeApi(o, log) {
   return new VkApi({
     token,
     version: o['api-version'] ?? '5.131',
-    baseUrl: o['api-base'] ?? process.env.VK_API_BASE ?? 'https://api.vk.com/method/',
+    domain: o.domain ?? process.env.VK_DOMAIN ?? 'vk.com',
+    baseUrl: o['api-base'] ?? process.env.VK_API_BASE,
     userAgent: appInfo?.userAgent,
     log,
   });
@@ -139,11 +142,13 @@ function makeApi(o, log) {
 async function cmdAuth(o, log) {
   const app = o.app ?? 'kate';
   const appId = o['app-id'] ? Number(o['app-id']) : undefined;
-  const url = buildAuthUrl({ app, appId, apiVersion: o['api-version'] ?? '5.131' });
+  const domain = o.domain ?? process.env.VK_DOMAIN ?? 'vk.com';
+  const url = buildAuthUrl({ app, appId, apiVersion: o['api-version'] ?? '5.131', domain });
   log.info(`\n1. Open this URL in a browser where you are logged in to vk.com:\n\n   ${url}\n`);
   log.info(`2. Log in / confirm access for "${appId ? `app ${appId}` : APPS[app].name}".`);
   log.info(`3. You will land on a blank page. Copy the ENTIRE address from the address bar`);
-  log.info(`   (it looks like https://oauth.vk.com/blank.html#access_token=...&user_id=...) and paste it below.\n`);
+  log.info(`   (it looks like https://oauth.${domain}/blank.html#access_token=...&user_id=...) and paste it below.`);
+  log.info(`   If the page does not open at all, run again with: --domain ${domain === 'vk.com' ? 'vk.ru' : 'vk.com'}\n`);
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answer = await new Promise((resolve) => rl.question('Paste URL here: ', resolve));
   rl.close();

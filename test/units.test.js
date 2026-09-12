@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { VkApi } from '../src/api.js';
 import { bestPhotoUrl, collectMedia, pickVideoFile } from '../src/attachments.js';
 import { buildAuthUrl, parseTokenInput } from '../src/auth.js';
 import { formatText } from '../src/render.js';
@@ -62,5 +63,30 @@ describe('attachment picking', () => {
 describe('formatText', () => {
   it('escapes, linkifies and keeps newlines', () => {
     assert.equal(formatText('a<b\nhttp://x.y/z. [club5|Pub]'), 'a&lt;b<br><a href="http://x.y/z">http://x.y/z</a>. <a href="https://vk.com/club5">Pub</a>');
+  });
+});
+
+describe('VkApi host fallback', () => {
+  it('switches from api.vk.com to api.vk.ru when the first host is unreachable', async () => {
+    const seen = [];
+    const fetchImpl = async (url) => {
+      seen.push(url);
+      if (url.startsWith('https://api.vk.com/')) throw new Error('getaddrinfo ENOTFOUND api.vk.com');
+      return { status: 200, text: async () => JSON.stringify({ response: [{ id: 1 }] }) };
+    };
+    const api = new VkApi({ token: 't', fetchImpl, minInterval: 0, log: { warn() {}, debug() {}, info() {} } });
+    const res = await api.call('users.get');
+    assert.deepEqual(res, [{ id: 1 }]);
+    assert.ok(seen[0].startsWith('https://api.vk.com/method/users.get'));
+    assert.ok(seen[1].startsWith('https://api.vk.ru/method/users.get'));
+    const res2 = await api.call('users.get');
+    assert.deepEqual(res2, [{ id: 1 }]);
+    assert.equal(seen.length, 3, 'stays on the working host afterwards');
+  });
+
+  it('builds vk.ru auth URLs when asked', () => {
+    const u = new URL(buildAuthUrl({ domain: 'vk.ru' }));
+    assert.equal(u.host, 'oauth.vk.ru');
+    assert.equal(u.searchParams.get('redirect_uri'), 'https://oauth.vk.ru/blank.html');
   });
 });
