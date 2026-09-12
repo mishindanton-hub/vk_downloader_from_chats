@@ -189,7 +189,7 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
         label: peer.title,
         retryFailed: flags.retryFailed,
         onProgress: (s) => {
-          hooks.media?.({ ...s, title: peer.title });
+          hooks.media?.({ ...s, title: peer.title, index: i + 1, total });
           if (Date.now() - lastLog > 5000) {
             log.info(`${tag}: media ${s.done + s.failed + s.skipped}/${s.total} (${formatBytes(s.bytes)})`);
             lastLog = Date.now();
@@ -197,6 +197,7 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
         },
       });
       if (jobs.length) log.info(`${tag}: media done: ${stats.done} downloaded, ${stats.skipped} already present, ${stats.failed} failed, ${formatBytes(stats.bytes)}`);
+      hooks.media?.({ ...stats, title: peer.title, index: i + 1, total, complete: true });
       entry.media_ok = Object.values(index).filter((r) => r.status === 'ok').length;
       entry.media_failed = Object.values(index).filter((r) => r.status === 'failed').length;
       activity.set(`building the pages of ${peer.title} (${messages.length} messages)`);

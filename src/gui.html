@@ -123,7 +123,9 @@ function render() {
   if (s.phase === 'pages') st.innerHTML = '<span class="pulse"></span>Building readable pages for every chat first (a few minutes)…';
   else if (s.phase === 'media' && s.progress) {
     const p = s.progress; const m = p.media;
-    st.innerHTML = `<span class="pulse"></span>Chat ${p.index} of ${p.total}: <b>${esc(p.title)}</b>${m ? ` · ${m.done + m.failed + m.skipped}/${m.total} files, ${fmtBytes(m.bytes)} downloaded` : ''}${s.activity ? `<div style="color:var(--muted);font-size:13px">${esc(s.activity)}</div>` : ''}`;
+    const files = m ? `${m.done + m.failed + m.skipped}/${m.total} files, ${fmtBytes(m.bytes)}${m.complete ? ' · done' : ''}` : 'preparing…';
+    const next = s.reading && s.reading.index > p.index ? `<div style="color:var(--muted);font-size:13px">Next: chat ${s.reading.index}, ${esc(s.reading.title)}</div>` : '';
+    st.innerHTML = `<span class="pulse"></span>Chat ${p.index} of ${p.total}: <b>${esc(p.title)}</b> · ${files}${next}`;
     bar.classList.remove('hidden'); bar.firstElementChild.style.width = `${Math.round((p.index / p.total) * 100)}%`;
   } else if (s.phase === 'media') st.innerHTML = '<span class="pulse"></span>Starting…';
   else if (s.phase === 'stats') st.innerHTML = '<span class="pulse"></span>Almost done: computing messaging statistics…';

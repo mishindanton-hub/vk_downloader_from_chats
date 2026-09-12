@@ -46,7 +46,8 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     chats: 0,
     parts: 0,
     exportDone: false,
-    progress: null, // { index, total, title, media: {done,failed,skipped,total,bytes} }
+    progress: null, // the chat whose media is downloading: { index, total, title, media: {done,failed,skipped,total,bytes,complete} }
+    reading: null, // the chat being read/prepared meanwhile: { index, total, title }
     result: null,
     error: null,
     started_at: Date.now(),
@@ -113,7 +114,7 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     if (running) return;
     running = true;
     stopWatch = true;
-    setState({ phase: 'pages', error: null, result: null, progress: null });
+    setState({ phase: 'pages', error: null, result: null, progress: null, reading: null });
     const stopHb = startHeartbeat(log);
     try {
       const summary = await runArchive({
@@ -124,14 +125,16 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
         concurrency,
         hooks: {
           phase: (p) => setState({ phase: p }),
-          chat: (c) => setState({ progress: { ...c, media: null } }),
-          media: (m) => setState({ progress: { ...(state.progress ?? {}), media: m } }),
+          // The loop reads the next chat while the previous one's files are still
+          // downloading, so "reading" and "downloading" are two different chats.
+          chat: (c) => setState({ reading: c, progress: state.progress ?? { ...c, media: null } }),
+          media: (m) => setState({ progress: { index: m.index, total: m.total, title: m.title, media: m } }),
         },
       });
       const ok = summary.filter((s) => s.status === 'ok').length;
       const failed = summary.reduce((n, s) => n + (s.media_failed ?? 0), 0);
       const mediaOk = summary.reduce((n, s) => n + (s.media_ok ?? 0), 0);
-      setState({ phase: 'done', result: { chats: ok, media: mediaOk, failed }, progress: null });
+      setState({ phase: 'done', result: { chats: ok, media: mediaOk, failed }, progress: null, reading: null });
     } catch (err) {
       log.error(err.message);
       setState({ phase: 'error', error: err.message });
