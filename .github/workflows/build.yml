@@ -33,7 +33,7 @@ jobs:
         include:
           - os: macos-14
             name: macOS-Apple-Silicon
-          - os: macos-13
+          - os: macos-15-intel
             name: macOS-Intel
           - os: windows-latest
             name: Windows
