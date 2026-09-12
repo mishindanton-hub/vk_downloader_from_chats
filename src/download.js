@@ -38,16 +38,29 @@ export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed
 
   await mapLimit(pending, concurrency, async (job) => {
     const abs = path.join(dir, job.rel);
-    try {
-      const size = await downloadFile(job.url, abs, { fetchImpl, userAgent });
-      index[job.key] = { status: 'ok', path: job.rel, kind: job.kind, size, url: job.url, title: job.title, msg_id: job.msg_id };
-      stats.done += 1;
-      stats.bytes += size;
-    } catch (err) {
+    const urls = [job.url, ...(job.alternatives ?? [])];
+    let firstErr = null;
+    let ok = false;
+    for (const [i, url] of urls.entries()) {
+      try {
+        const size = await downloadFile(url, abs, { fetchImpl, userAgent });
+        index[job.key] = { status: 'ok', path: job.rel, kind: job.kind, size, url, title: job.title, msg_id: job.msg_id, ...(i ? { fallback: i } : {}) };
+        stats.done += 1;
+        stats.bytes += size;
+        ok = true;
+        break;
+      } catch (err) {
+        firstErr ??= err;
+        // A dead network is not fixed by another URL; a 4xx/5xx for this variant may be.
+        if (!err.status) break;
+      }
+    }
+    if (!ok) {
+      const err = firstErr;
       const permanent = Boolean(err.permanent);
-      index[job.key] = { status: 'failed', path: job.rel, kind: job.kind, url: job.url, error: err.message, permanent, msg_id: job.msg_id };
+      index[job.key] = { status: 'failed', path: job.rel, kind: job.kind, url: job.url, error: err.message, permanent, msg_id: job.msg_id, tried: urls.length };
       stats.failed += 1;
-      log.warn(`download failed ${job.key}: ${err.message}`);
+      log.warn(`download failed ${job.key}: ${err.message}${urls.length > 1 ? ` (${urls.length} sizes tried)` : ''}`);
     }
     dirty += 1;
     if (dirty >= 20) flush();
@@ -57,11 +70,16 @@ export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed
   return { index, stats };
 }
 
+// VK's image backend answers 424 when it cannot produce that particular size; waiting does not
+// help, but another size of the same photo usually works.
+const NO_RETRY = new Set([424]);
+
 export class HttpError extends Error {
   constructor(status, url) {
     super(`HTTP ${status} for ${url}`);
     this.status = status;
     this.permanent = PERMANENT.has(status);
+    this.noRetry = NO_RETRY.has(status);
   }
 }
 
@@ -81,7 +99,7 @@ export async function downloadFile(url, dest, { fetchImpl = globalThis.fetch, re
       } catch {
         /* nothing to clean */
       }
-      if (err.permanent || attempt >= retries) throw err;
+      if (err.permanent || err.noRetry || attempt >= retries) throw err;
       attempt += 1;
       await sleep(Math.min(20000, 1500 * 2 ** attempt));
     }

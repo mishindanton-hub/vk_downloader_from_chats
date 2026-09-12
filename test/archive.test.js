@@ -67,6 +67,9 @@ describe('end-to-end archive against a fake VK', () => {
     assert.ok(index['photo2_10'].url.endsWith('/files/photo2_10.jpg'), 'largest size chosen');
     assert.ok(fs.existsSync(path.join(dir, index['photo2_10'].path)));
     assert.equal(index['photo2_35'].status, 'ok', 'flaky download retried');
+    assert.equal(index['photo2_41'].status, 'ok', 'falls back to a smaller size when the largest answers 424');
+    assert.ok(index['photo2_41'].url.endsWith('/files/m_gone424.jpg'), 'next size down was used');
+    assert.equal(index['photo2_41'].fallback, 1);
     assert.equal(index['photo2_33'].status, 'failed');
     assert.equal(index['photo2_33'].permanent, true);
     assert.equal(failed.length, 1);
@@ -144,7 +147,7 @@ describe('end-to-end archive against a fake VK', () => {
     const filesBefore = vk.state.filesServed;
     const api3 = new VkApi({ token: TOKEN, baseUrl: vk.apiBase, minInterval: 0, log: silent });
     await runArchive({ api: api3, out, log: silent, flags: { maxVideoQuality: 720, retryFailed: true }, peerFilter: [2] });
-    assert.equal(vk.state.filesServed, filesBefore + 1);
+    assert.equal(vk.state.filesServed, filesBefore + 3, 'every size of the missing photo is tried again');
   });
 
   it('computes messaging stats from the archived messages', () => {

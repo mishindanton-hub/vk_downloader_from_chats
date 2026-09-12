@@ -7,8 +7,8 @@ import http from 'node:http';
 export const TOKEN = 'test-token';
 export const ME = { id: 1, first_name: 'Me', last_name: 'Self' };
 
-function photo(owner, id, base, { broken = false, flaky = false } = {}) {
-  const name = broken ? 'missing.jpg' : flaky ? 'flaky.jpg' : `photo${owner}_${id}.jpg`;
+function photo(owner, id, base, { broken = false, flaky = false, bigGone = false } = {}) {
+  const name = broken ? 'missing.jpg' : flaky ? 'flaky.jpg' : bigGone ? 'gone424.jpg' : `photo${owner}_${id}.jpg`;
   return {
     type: 'photo',
     photo: {
@@ -44,6 +44,7 @@ export function buildMessages(base) {
     if (i === 31) m.attachments.push({ type: 'audio', audio: { id: 31, owner_id: 2, artist: 'Artist', title: 'HLS Song', url: `${base}/files/song31.m3u8` } });
     if (i === 33) m.attachments.push(photo(2, 33, base, { broken: true }));
     if (i === 35) m.attachments.push(photo(2, 35, base, { flaky: true }));
+    if (i === 41) m.attachments.push(photo(2, 41, base, { bigGone: true }));
     if (i === 37) m.attachments.push({ type: 'market', market: { id: 37, owner_id: -100, title: 'Mug', thumb_photo: `${base}/files/market37.jpg` } });
     if (i === 39) m.attachments.push({ type: 'poll', poll: { id: 39, question: 'Tea or coffee?' } });
     if (i === 41) m.text = 'Hi [id2|Alice] check https://example.com/page?x=1 <script>alert(1)</script>';
@@ -83,7 +84,11 @@ export function startFakeVk() {
       const name = url.pathname.slice('/files/'.length);
       state.filesServed += 1;
       state.lastFileUserAgent = req.headers['user-agent'];
-      if (name === 'missing.jpg') {
+      if (name === 'gone424.jpg') {
+        res.statusCode = 424;
+        return res.end('failed dependency');
+      }
+      if (name.endsWith('missing.jpg')) {
         res.statusCode = 404;
         return res.end('nope');
       }

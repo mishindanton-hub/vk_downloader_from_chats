@@ -39,9 +39,9 @@ export function collectMedia(messages, opts = {}) {
       case 'photo': {
         if (opts.skipPhotos) return;
         const key = `photo${obj.owner_id}_${obj.id}`;
-        const url = bestPhotoUrl(obj);
+        const [url, ...alternatives] = photoUrls(obj);
         if (!url) return;
-        add({ key, kind: 'photo', url, rel: `media/photos/${key}.${extFromUrl(url, 'jpg')}`, msg_id: msg.id, date: msg.date });
+        add({ key, kind: 'photo', url, alternatives, rel: `media/photos/${key}.${extFromUrl(url, 'jpg')}`, msg_id: msg.id, date: msg.date });
         return;
       }
       case 'video': {
@@ -141,14 +141,20 @@ export function collectMedia(messages, opts = {}) {
 
 /** Pick the largest size of a photo object. Handles both `sizes[]` (modern) and photo_XXX fields (legacy). */
 export function bestPhotoUrl(photo) {
-  if (!photo) return null;
+  return photoUrls(photo)[0] ?? null;
+}
+
+/** Every size URL of a photo, largest first. VK sometimes fails (HTTP 424) for one size but serves the others. */
+export function photoUrls(photo) {
+  if (!photo) return [];
+  let urls = [];
   if (Array.isArray(photo.sizes) && photo.sizes.length) {
-    const ranked = [...photo.sizes].sort((a, b) => area(b) - area(a));
-    return ranked[0].url || ranked[0].src || null;
+    urls = [...photo.sizes].sort((a, b) => area(b) - area(a)).map((sz) => sz.url || sz.src);
+  } else {
+    const legacy = ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75'];
+    urls = legacy.map((k) => photo[k]);
   }
-  const legacy = ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75'];
-  for (const k of legacy) if (photo[k]) return photo[k];
-  return null;
+  return [...new Set(urls.filter(Boolean))];
 }
 
 const TYPE_RANK = { w: 10, z: 9, y: 8, x: 7, r: 6, q: 5, p: 4, o: 3, m: 2, s: 1 };
