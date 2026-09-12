@@ -75,6 +75,13 @@ cd ~/Downloads/vk_downloader_from_chats-*    # wherever you put the folder
 node bin/vk-archive.js auth --domain vk.ru
 ```
 
+If the login link opened on `vk.com` but the blank page you copied is on `oauth.vk.ru`,
+nothing extra is needed: the tool remembers that VK sent you to `vk.ru` and talks to
+`api.vk.ru` from then on. The API calls also follow redirects and switch between
+`api.vk.com` and `api.vk.ru` automatically if one of them does not answer within
+20 seconds, so a pause of up to a minute right after "Token saved" is normal.
+To force a host explicitly, add `--domain vk.ru` (or `vk.com`) to any command.
+
 ### Plan B: export from the browser, no token (when VK answers "Flood control")
 
 VK sometimes refuses tokens obtained through the login link above, even valid ones.
@@ -105,13 +112,6 @@ login, so the export can run from the browser's console instead:
 
 The result is identical to the token route. Media files come from VK's public file
 servers, which do not need a login.
-
-If the login link opened on `vk.com` but the blank page you copied is on `oauth.vk.ru`,
-nothing extra is needed: the tool remembers that VK sent you to `vk.ru` and talks to
-`api.vk.ru` from then on. The API calls also follow redirects and switch between
-`api.vk.com` and `api.vk.ru` automatically if one of them does not answer within
-20 seconds, so a pause of up to a minute right after "Token saved" is normal.
-To force a host explicitly, add `--domain vk.ru` (or `vk.com`) to any command.
 
 ## Quick start (Terminal)
 
