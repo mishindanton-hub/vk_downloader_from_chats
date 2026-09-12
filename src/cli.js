@@ -1,10 +1,14 @@
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import readline from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { VkApi } from './api.js';
 import { rerender, runArchive } from './archive.js';
 import { APPS, buildAuthUrl, parseTokenInput } from './auth.js';
 import { CONFIG_FILE, loadConfig, resolveToken, saveConfig } from './config.js';
+import { importExport } from './import.js';
 import { NameBook, listConversations } from './peers.js';
 import { formatDate, makeLogger, sleep } from './util.js';
 
@@ -25,6 +29,15 @@ Usage:
   vk-archive render [--out DIR]
         Rebuild HTML/JSON/TXT from already-downloaded data, no network needed.
 
+Without a token (browser route, when VK refuses the token):
+  vk-archive browser
+        Show how to export all chats from the VK web page's console
+        (copies browser-export.js to the clipboard on macOS).
+  vk-archive import FILE...
+        Import the vk-export-*.json files saved by that script.
+  vk-archive run --offline [options]
+        Download all media and render, using only the imported data.
+
 Options for run:
   --out DIR              output directory (default ./vk-archive)
   --peer ID[,ID...]      only these peer ids (user id, -group id, or 2000000000+chat id)
@@ -40,6 +53,7 @@ Options for run:
   --api-version V        VK API version (default 5.131)
   --domain vk.com|vk.ru  which VK host to talk to (default vk.com, falls back to vk.ru automatically)
   --no-user-agent        do not impersonate the app the token was issued for
+  --offline              no API calls: use data from "import" (browser export)
   -v, --verbose          chatty logging
 `;
 
@@ -64,6 +78,7 @@ const OPTIONS = {
   'skip-groups': { type: 'boolean' },
   'retry-failed': { type: 'boolean' },
   'no-user-agent': { type: 'boolean' },
+  offline: { type: 'boolean' },
   verbose: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
 };
@@ -83,8 +98,14 @@ export async function main(argv) {
     rerender({ out: path.resolve(o.out ?? 'vk-archive'), log });
     return 0;
   }
+  if (cmd === 'browser') return cmdBrowser(log);
+  if (cmd === 'import') {
+    importExport({ files: positionals.slice(1), out: path.resolve(o.out ?? 'vk-archive'), log });
+    log.info(`\nNow run: node bin/vk-archive.js run --offline`);
+    return 0;
+  }
 
-  const api = makeApi(o, log);
+  const api = cmd === 'run' && o.offline ? null : makeApi(o, log);
   if (cmd === 'whoami') {
     log.info(`Checking the token at ${api.baseUrl} ...`);
     const [me] = await api.call('users.get', { fields: 'screen_name' });
@@ -121,7 +142,7 @@ export async function main(argv) {
       peerFilter: o.peer ? o.peer.split(',').map((s) => s.trim()).filter(Boolean) : null,
       flags,
       concurrency: o.concurrency ? Number(o.concurrency) : 4,
-      userAgent: api.userAgent,
+      userAgent: api?.userAgent,
     });
     return 0;
   }
@@ -233,5 +254,40 @@ async function cmdAuth(o, log) {
   saveConfig(cfg);
   if (savedDomain !== domain) log.info(`\nVK sent you to ${savedDomain}, so the API will be used at api.${savedDomain}.`);
   log.info(`\nToken saved to ${CONFIG_FILE}. Now run: vk-archive whoami`);
+  return 0;
+}
+
+const BROWSER_SCRIPT = new URL('../browser-export.js', import.meta.url);
+
+/** Explain the browser route and put the console script on the clipboard where we can. */
+async function cmdBrowser(log) {
+  const script = fs.readFileSync(BROWSER_SCRIPT, 'utf8');
+  let copied = false;
+  if (process.platform === 'darwin') {
+    try {
+      const r = spawnSync('pbcopy', { input: script });
+      copied = r.status === 0;
+    } catch {
+      /* no pbcopy */
+    }
+  }
+  log.info(`The browser route needs no token: the VK web page's own API client does the work.
+
+1. In your browser, open https://vk.ru/im (or https://vk.com/im) and make sure you are logged in.
+2. Open the developer console on that tab:
+     Safari: first enable Safari > Settings > Advanced > "Show features for web developers",
+             then Develop > Show JavaScript Console (Cmd+Option+C).
+     Chrome: View > Developer > JavaScript Console (Cmd+Option+J).
+3. Paste the script and press Enter.
+     ${copied ? 'It is already on your clipboard, just press Cmd+V in the console.' : `Copy the whole file ${fileURLToPath(BROWSER_SCRIPT)} and paste it.`}
+   If the console refuses the paste, type "allow pasting" first (Chrome asks for this once).
+4. Watch the [vk-archive] lines. It walks every conversation and saves files named
+   vk-export-001.json, vk-export-002.json, ... into your Downloads folder. Allow multiple
+   downloads if the browser asks. Keep the tab open until it says "All done".
+5. Back here, run:
+     node bin/vk-archive.js import ~/Downloads/vk-export-*.json
+     node bin/vk-archive.js run --offline
+   (or double-click "Import VK Export.command", which does both).
+`);
   return 0;
 }

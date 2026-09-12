@@ -4,6 +4,7 @@ import { collectMedia, pickVideoFile } from './attachments.js';
 import { downloadAll } from './download.js';
 import { fetchHistory, readMessages } from './history.js';
 import { NameBook, listConversations, peerDir } from './peers.js';
+import { VIDEO_CACHE } from './import.js';
 import { renderIndexHtml, writeChatOutputs } from './render.js';
 import { ensureDir, extFromUrl, formatBytes, readJson, writeJson } from './util.js';
 
@@ -16,20 +17,35 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
   ensureDir(out);
   const namesPath = path.join(out, 'names.json');
   const names = NameBook.fromJSON(readJson(namesPath, null));
+  const offline = !api;
+  // Offline mode (after `import` of a browser export): everything comes from disk, no API calls at all.
+  const videoCache = offline ? readJson(path.join(out, VIDEO_CACHE), {}) ?? {} : null;
 
   // Who am I? Needed to mark outgoing messages and for the index page.
-  const meRes = await api.call('users.get', { fields: 'screen_name,photo_100' });
-  const me = Array.isArray(meRes) ? meRes[0] : meRes;
-  if (!me?.id) throw new Error('users.get did not return the current user; is the token valid?');
-  names.users.set(me.id, me);
-  writeJson(path.join(out, 'me.json'), me);
-  log.info(`Logged in as ${me.first_name} ${me.last_name} (id${me.id})`);
+  let me;
+  if (offline) {
+    me = readJson(path.join(out, 'me.json'), null);
+    if (!me?.id) throw new Error(`${path.join(out, 'me.json')} not found. Run "vk-archive import <files>" first, or run without --offline.`);
+  } else {
+    const meRes = await api.call('users.get', { fields: 'screen_name,photo_100' });
+    me = Array.isArray(meRes) ? meRes[0] : meRes;
+    if (!me?.id) throw new Error('users.get did not return the current user; is the token valid?');
+    names.users.set(me.id, me);
+    writeJson(path.join(out, 'me.json'), me);
+  }
+  log.info(`${offline ? 'Offline mode. Archive of' : 'Logged in as'} ${me.first_name} ${me.last_name} (id${me.id})`);
 
-  log.info('Listing conversations...');
-  let peers = await listConversations(api, names, log);
-  writeJson(path.join(out, 'conversations.json'), peers);
-  writeJson(namesPath, names.toJSON());
-  log.info(`Found ${peers.length} conversations`);
+  let peers;
+  if (offline) {
+    peers = readJson(path.join(out, 'conversations.json'), []) ?? [];
+    log.info(`${peers.length} conversations on disk`);
+  } else {
+    log.info('Listing conversations...');
+    peers = await listConversations(api, names, log);
+    writeJson(path.join(out, 'conversations.json'), peers);
+    writeJson(namesPath, names.toJSON());
+    log.info(`Found ${peers.length} conversations`);
+  }
 
   if (peerFilter?.length) {
     const wanted = new Set(peerFilter.map(Number));
@@ -54,31 +70,47 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
 
     // 1. history
     let state;
-    try {
-      let lastLog = 0;
-      const res = await fetchHistory({
-        api,
-        dir,
-        peer,
-        names,
-        log,
-        onProgress: ({ fetched, total: t }) => {
-          if (Date.now() - lastLog > 3000) {
-            log.info(`${tag}: ${fetched}/${t} messages`);
-            lastLog = Date.now();
-          }
-        },
-      });
-      state = res.state;
-      log.info(`${tag}: history ${res.skipped ? 'already complete' : 'done'} (${state.fetched} messages)`);
-    } catch (err) {
-      if (err.code === 917 || err.code === 15 || err.code === 7) {
-        log.warn(`${tag}: no access to history (${err.message}); skipping`);
-        entry.status = `skipped: ${err.body?.error_msg ?? err.message}`;
-        writeJson(path.join(dir, 'state.json'), { peer_id: peer.peer_id, title: peer.title, error: err.message });
+    if (offline) {
+      state = readJson(path.join(dir, 'state.json'), {}) ?? {};
+      if (state.error) {
+        entry.status = `skipped: ${state.error}`;
         continue;
       }
-      throw err;
+      if (!state.history_complete || !fs.existsSync(path.join(dir, 'messages.jsonl'))) {
+        log.warn(`${tag}: no history on disk; skipping (export it in the browser and import again)`);
+        entry.status = 'no history';
+        continue;
+      }
+    }
+    if (offline) {
+      log.info(`${tag}: history from browser export (${state.fetched} messages)`);
+    } else {
+      try {
+        let lastLog = 0;
+        const res = await fetchHistory({
+          api,
+          dir,
+          peer,
+          names,
+          log,
+          onProgress: ({ fetched, total: t }) => {
+            if (Date.now() - lastLog > 3000) {
+              log.info(`${tag}: ${fetched}/${t} messages`);
+              lastLog = Date.now();
+            }
+          },
+        });
+        state = res.state;
+        log.info(`${tag}: history ${res.skipped ? 'already complete' : 'done'} (${state.fetched} messages)`);
+      } catch (err) {
+        if (err.code === 917 || err.code === 15 || err.code === 7) {
+          log.warn(`${tag}: no access to history (${err.message}); skipping`);
+          entry.status = `skipped: ${err.body?.error_msg ?? err.message}`;
+          writeJson(path.join(dir, 'state.json'), { peer_id: peer.peer_id, title: peer.title, error: err.message });
+          continue;
+        }
+        throw err;
+      }
     }
     writeJson(namesPath, names.toJSON());
 
@@ -95,7 +127,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
     });
     const videoLinks = [];
     if (!flags.noVideo && media.videos.length) {
-      const resolved = await resolveVideos(api, media.videos, flags.maxVideoQuality ?? 2160, log);
+      const resolved = await resolveVideos(api, media.videos, flags.maxVideoQuality ?? 2160, log, videoCache);
       for (const v of resolved) {
         if (v.url) media.jobs.push({ key: v.key, kind: 'video', url: v.url, rel: `media/videos/${v.key}_${v.quality}p.${extFromUrl(v.url, 'mp4')}`, title: v.title, msg_id: v.msg_id });
         else videoLinks.push({ key: v.key, title: v.title, url: v.link, reason: v.reason });
@@ -112,8 +144,10 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
       if (m.reply_message) collect(m.reply_message);
     };
     messages.forEach(collect);
-    await names.resolveMissing(api, [...ids]);
-    writeJson(namesPath, names.toJSON());
+    if (!offline) {
+      await names.resolveMissing(api, [...ids]);
+      writeJson(namesPath, names.toJSON());
+    }
 
     // 3. download (overlaps with fetching the next chat's history)
     await pendingDownload;
@@ -145,7 +179,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
   }
   await pendingDownload;
   writeIndex(out, summary, me);
-  log.info(`\nDone. ${summary.length} chats. API calls: ${api.stats.calls} (${api.stats.retries} retries). Open ${path.join(out, 'index.html')}`);
+  log.info(`\nDone. ${summary.length} chats.${offline ? '' : ` API calls: ${api.stats.calls} (${api.stats.retries} retries).`} Open ${path.join(out, 'index.html')}`);
   return summary;
 }
 
@@ -154,8 +188,11 @@ function writeIndex(out, summary, me) {
   fs.writeFileSync(path.join(out, 'index.html'), renderIndexHtml(summary, me));
 }
 
-/** Look up direct file URLs for videos via video.get (batched). */
-export async function resolveVideos(api, videos, maxQuality, log) {
+/**
+ * Look up direct file URLs for videos via video.get (batched), or, in offline mode,
+ * from the cache written by `import` (the browser export already called video.get).
+ */
+export async function resolveVideos(api, videos, maxQuality, log, cache = null) {
   const results = [];
   const byKey = new Map(videos.map((v) => [`${v.owner_id}_${v.id}`, v]));
   const ids = [...byKey.keys()];
@@ -166,11 +203,15 @@ export async function resolveVideos(api, videos, maxQuality, log) {
       return v.access_key ? `${k}_${v.access_key}` : k;
     });
     let items = [];
-    try {
-      const res = await api.call('video.get', { videos: param, count: chunk.length, extended: 0 });
-      items = res?.items ?? [];
-    } catch (err) {
-      log.warn(`video.get failed for a batch of ${chunk.length}: ${err.message}`);
+    if (cache) {
+      items = chunk.map((k) => cache[k]).filter(Boolean);
+    } else {
+      try {
+        const res = await api.call('video.get', { videos: param, count: chunk.length, extended: 0 });
+        items = res?.items ?? [];
+      } catch (err) {
+        log.warn(`video.get failed for a batch of ${chunk.length}: ${err.message}`);
+      }
     }
     const found = new Map(items.map((it) => [`${it.owner_id}_${it.id}`, it]));
     for (const k of chunk) {

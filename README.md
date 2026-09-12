@@ -75,6 +75,37 @@ cd ~/Downloads/vk_downloader_from_chats-*    # wherever you put the folder
 node bin/vk-archive.js auth --domain vk.ru
 ```
 
+### Plan B: export from the browser, no token (when VK answers "Flood control")
+
+VK sometimes refuses tokens obtained through the login link above, even valid ones.
+The messenger web page has its own API client that works with your normal browser
+login, so the export can run from the browser's console instead:
+
+1. In Safari or Chrome open https://vk.ru/im (or https://vk.com/im) and log in.
+2. Open the JavaScript console on that tab. Chrome: **View → Developer → JavaScript
+   Console** (Cmd+Option+J). Safari: enable **Safari → Settings → Advanced → Show
+   features for web developers** once, then **Develop → Show JavaScript Console**.
+3. Open the file `browser-export.js` from this folder in TextEdit, select all, copy,
+   paste it into the console and press Enter. (Or run `node bin/vk-archive.js browser`
+   in Terminal, which puts the script on your clipboard and prints these steps.)
+   If Chrome refuses the paste, type `allow pasting`, press Enter, and paste again.
+4. Watch the `[vk-archive]` lines. It walks every chat and saves `vk-export-001.json`,
+   `vk-export-002.json`, ... to Downloads (allow multiple downloads if asked). Keep the
+   tab open until it prints "All done". If you had to close it, set `startFrom` at the
+   top of the script to the number it printed and paste it again.
+5. Double-click `Import VK Export.command` in this folder (same Gatekeeper dance as in
+   step 3 of the main guide). It imports the files from Downloads, then downloads every
+   photo, video, voice message and document and builds `vk-archive/index.html`.
+   From Terminal the same is:
+
+   ```bash
+   node bin/vk-archive.js import ~/Downloads/vk-export-*.json
+   node bin/vk-archive.js run --offline
+   ```
+
+The result is identical to the token route. Media files come from VK's public file
+servers, which do not need a login.
+
 If the login link opened on `vk.com` but the blank page you copied is on `oauth.vk.ru`,
 nothing extra is needed: the tool remembers that VK sent you to `vk.ru` and talks to
 `api.vk.ru` from then on. The API calls also follow redirects and switch between
@@ -127,7 +158,8 @@ API version and user agent, with no retries, and prints the flags that work
 (for example `run --domain vk.ru --api-version 5.199 --no-user-agent`).
 If every line says "Flood control": make sure no other Terminal window is still running
 the tool, wait 15-30 minutes, and try again. If it still persists, get a token from
-another official app (`auth --app android`, `--app iphone`, `--app vkme`, `--app vkadmin`).
+another official app (`auth --app android`, `--app iphone`, `--app vkme`, `--app vkadmin`),
+or skip tokens altogether with the browser export described in "Plan B" above.
 
 The token can read everything in your account, so treat it like a password.
 Revoke it afterwards at vk.com -> Settings -> Security -> Application access
@@ -165,6 +197,11 @@ scratch (for example because new messages arrived), delete its `state.json` and
 
 `node bin/vk-archive.js render` rebuilds the HTML/JSON/TXT from data already on disk
 without any network access (useful after editing the templates).
+
+`node bin/vk-archive.js import FILE...` loads `vk-export-*.json` files produced by
+`browser-export.js` (see Plan B) into the same layout, and `run --offline` then does the
+media stage without a single API call. The two routes can be mixed: an imported chat is
+simply a chat whose history is already complete.
 
 ## What you get
 
