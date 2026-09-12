@@ -82,6 +82,7 @@ export function startFakeVk() {
     if (url.pathname.startsWith('/files/')) {
       const name = url.pathname.slice('/files/'.length);
       state.filesServed += 1;
+      state.lastFileUserAgent = req.headers['user-agent'];
       if (name === 'missing.jpg') {
         res.statusCode = 404;
         return res.end('nope');

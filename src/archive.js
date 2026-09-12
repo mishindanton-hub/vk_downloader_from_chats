@@ -4,7 +4,7 @@ import { collectMedia, pickVideoFile } from './attachments.js';
 import { downloadAll } from './download.js';
 import { fetchHistory, readMessages } from './history.js';
 import { NameBook, listConversations, peerDir } from './peers.js';
-import { VIDEO_CACHE } from './import.js';
+import { EXPORT_META, VIDEO_CACHE } from './import.js';
 import { renderIndexHtml, writeChatOutputs } from './render.js';
 import { writeStats } from './stats.js';
 import { ensureDir, extFromUrl, formatBytes, readJson, writeJson } from './util.js';
@@ -21,6 +21,11 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
   const offline = !api;
   // Offline mode (after `import` of a browser export): everything comes from disk, no API calls at all.
   const videoCache = offline ? readJson(path.join(out, VIDEO_CACHE), {}) ?? {} : null;
+  if (offline && !userAgent) {
+    // Video links from the browser export are bound to the browser that requested them
+    // (srcAg=CHROME_MAC etc.), so downloads must present the same identity.
+    userAgent = readJson(path.join(out, EXPORT_META), null)?.user_agent ?? defaultBrowserUserAgent();
+  }
 
   // Who am I? Needed to mark outgoing messages and for the index page.
   let me;
@@ -267,4 +272,10 @@ export function rerender({ out, log }) {
   writeIndex(out, summary, me);
   writeStats(out, log);
   return summary;
+}
+
+/** A current desktop-browser identity for this OS, used when the export did not record one. */
+export function defaultBrowserUserAgent() {
+  const os = process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : 'X11; Linux x86_64';
+  return `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36`;
 }

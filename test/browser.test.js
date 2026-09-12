@@ -37,6 +37,7 @@ describe('browser export -> import -> run --offline', () => {
     const sandbox = {
       window: { vkApi: { api }, __vkArchiveSave: (name, text) => saved.push({ name, text }) },
       console: { log() {}, error(...a) { throw new Error(a.join(' ')); } },
+      navigator: { userAgent: 'TestBrowser/1.0' },
       setTimeout,
     };
     sandbox.globalThis = sandbox;
@@ -83,6 +84,12 @@ describe('browser export -> import -> run --offline', () => {
     assert.ok(fs.existsSync(path.join(dir, index['video2_11'].path)));
     const notDownloaded = fs.readFileSync(path.join(dir, 'videos-not-downloaded.txt'), 'utf8');
     assert.match(notDownloaded, /video2_13|youtube/i);
+  });
+
+  it('downloads media with the browser identity recorded in the export', () => {
+    const meta = JSON.parse(fs.readFileSync(path.join(out, 'export-meta.json'), 'utf8'));
+    assert.equal(meta.user_agent, 'TestBrowser/1.0');
+    assert.equal(vk.state.lastFileUserAgent, 'TestBrowser/1.0');
   });
 
   it('renders the same outputs as the API route and names people from the export', () => {

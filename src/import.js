@@ -4,6 +4,7 @@ import { NameBook, describePeer, peerDir } from './peers.js';
 import { ensureDir, readJson, writeJson } from './util.js';
 
 export const VIDEO_CACHE = 'videos-cache.json';
+export const EXPORT_META = 'export-meta.json';
 
 /**
  * Import files produced by browser-export.js (pasted into the VK web page's console)
@@ -39,6 +40,7 @@ export function importExport({ files, out, log }) {
     names.absorb({ profiles: data.profiles, groups: data.groups });
     if (data.me?.id) me = data.me;
     if (data.done) sawDone = true;
+    if (data.user_agent) writeJson(path.join(out, EXPORT_META), { user_agent: data.user_agent, exported_at: data.exported_at });
     for (const item of data.conversations ?? []) {
       const p = describePeer(item, names);
       peersById.set(p.peer_id, p);

@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ensureDir, formatBytes, mapLimit, readJson, sleep, writeJson } from './util.js';
 
-const PERMANENT = new Set([400, 401, 403, 404, 410]);
+// 400 is deliberately not here: VK's video CDN answers 400 when the link's IP/browser binding
+// does not match, which a later run with the right identity can fix.
+const PERMANENT = new Set([401, 403, 404, 410]);
 
 /**
  * Download a list of jobs into `dir`, recording outcome in `<dir>/media-index.json`.

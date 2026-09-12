@@ -23,6 +23,7 @@ const PART_RE = /^vk-export-\d+\.json$/;
  * No token, no API calls from this machine except plain file downloads.
  */
 export async function runEasy({ out: outFlag, downloads: dlFlag, log, flags = {}, concurrency = 4 }) {
+  flags = { ...flags };
   const cfg = loadConfig();
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
@@ -51,6 +52,7 @@ export async function runEasy({ out: outFlag, downloads: dlFlag, log, flags = {}
   if (existing?.length) {
     const a = (await ask(`This folder already holds an archive with ${existing.length} chats.\n  [1] Continue: download any media still missing and rebuild the pages (default)\n  [2] Export the chats from the browser again (new messages, or first export did not finish)\n> `)).trim();
     mode = a === '2' ? 'export' : 'continue';
+    if (mode === 'continue') flags = { ...flags, retryFailed: true };
   }
 
   if (mode === 'export') {

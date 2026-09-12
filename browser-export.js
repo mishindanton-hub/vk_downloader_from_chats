@@ -155,6 +155,8 @@ const SETTINGS = {
       part,
       done,
       exported_at: new Date().toISOString(),
+      // VK's video servers only serve links to the same browser/IP that asked for them.
+      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
       me,
       total_conversations: conversations.length,
       conversations: done || part === 1 ? conversations : undefined,
