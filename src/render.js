@@ -127,7 +127,9 @@ function renderAttachment(att, index, names, depth) {
   switch (type) {
     case 'photo': {
       if (local) return `<a class="att photo" href="${enc(local)}" target="_blank"><img loading="lazy" src="${enc(local)}" alt="photo"></a>`;
-      return `<div class="att missing">[photo ${key} not downloaded]</div>`;
+      const why = index[key]?.error ? ` (${escapeHtml(String(index[key].error).replace(/ for https?:\S+/, ''))})` : '';
+      const vkLink = `https://vk.com/photo${o.owner_id}_${o.id}${o.access_key ? `_${o.access_key}` : ''}`;
+      return `<div class="att missing">📷 photo not downloaded${why} · <a href="${vkLink}" target="_blank">open on VK</a></div>`;
     }
     case 'video': {
       const link = `https://vk.com/video${o.owner_id}_${o.id}`;

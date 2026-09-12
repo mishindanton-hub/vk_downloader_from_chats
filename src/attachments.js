@@ -154,7 +154,10 @@ export function photoUrls(photo) {
     const legacy = ['photo_2560', 'photo_1280', 'photo_807', 'photo_604', 'photo_130', 'photo_75'];
     urls = legacy.map((k) => photo[k]);
   }
-  return [...new Set(urls.filter(Boolean))];
+  urls = urls.filter(Boolean);
+  // Last resort: the plain file without VK's size/signature parameters sometimes still answers.
+  const bare = urls.map((u) => u.split('?')[0]).filter((u) => /\.(jpe?g|png|webp|gif)$/i.test(u));
+  return [...new Set([...urls, ...bare])];
 }
 
 const TYPE_RANK = { w: 10, z: 9, y: 8, x: 7, r: 6, q: 5, p: 4, o: 3, m: 2, s: 1 };
