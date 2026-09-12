@@ -28,6 +28,12 @@ export const APPS = {
     name: 'VK iPhone',
     userAgent: 'com.vk.vkclient/1425 (iPhone, iOS 16.6, iPhone13,2, Scale/3.0)',
   },
+  // VK Me (messenger): another official client id.
+  vkme: {
+    id: 6146827,
+    name: 'VK Me',
+    userAgent: 'VKAndroidApp/8.60-20321 (Android 12; SDK 31; arm64-v8a; Google Pixel 6; ru; 2400x1080)',
+  },
   // VK Admin: sometimes works when the others are blocked.
   vkadmin: {
     id: 6121396,

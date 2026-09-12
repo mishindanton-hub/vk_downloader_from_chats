@@ -127,7 +127,8 @@ export class VkApi {
           this.stats.retries += 1;
           const base = e.error_code === 9 || e.error_code === 29 ? 5000 : 700;
           const delay = Math.min(60000, base * 2 ** (attempt - 1));
-          this.log.debug(`${method}: [${e.error_code}] ${e.error_msg}; retry ${attempt}/${this.maxRetries} in ${delay}ms`);
+          const say = e.error_code === 6 ? this.log.debug : this.log.warn;
+          say.call(this.log, `${method}: VK says [${e.error_code}] ${e.error_msg}; waiting ${Math.round(delay / 1000)}s and retrying (${attempt}/${this.maxRetries})`);
           await sleep(delay);
           continue;
         }

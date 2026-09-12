@@ -6,15 +6,18 @@ import { rerender, runArchive } from './archive.js';
 import { APPS, buildAuthUrl, parseTokenInput } from './auth.js';
 import { CONFIG_FILE, loadConfig, resolveToken, saveConfig } from './config.js';
 import { NameBook, listConversations } from './peers.js';
-import { formatDate, makeLogger } from './util.js';
+import { formatDate, makeLogger, sleep } from './util.js';
 
 const HELP = `vk-archive: offload all your VK conversations (text + media) to disk.
 
 Usage:
-  vk-archive auth [--app kate|android|iphone|vkadmin] [--app-id N]
+  vk-archive auth [--app kate|android|iphone|vkme|vkadmin] [--app-id N]
         Print the login URL, then paste the resulting URL back to store the token.
   vk-archive whoami
         Check the stored token.
+  vk-archive diagnose
+        Try the token against both hosts, several API versions and user agents
+        and report which combination VK accepts (use when whoami fails).
   vk-archive chats
         List every conversation the token can see.
   vk-archive run [options]
@@ -36,6 +39,7 @@ Options for run:
   --token TOKEN          use this token instead of the stored one (or VK_TOKEN env)
   --api-version V        VK API version (default 5.131)
   --domain vk.com|vk.ru  which VK host to talk to (default vk.com, falls back to vk.ru automatically)
+  --no-user-agent        do not impersonate the app the token was issued for
   -v, --verbose          chatty logging
 `;
 
@@ -59,6 +63,7 @@ const OPTIONS = {
   'no-music': { type: 'boolean' },
   'skip-groups': { type: 'boolean' },
   'retry-failed': { type: 'boolean' },
+  'no-user-agent': { type: 'boolean' },
   verbose: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
 };
@@ -73,6 +78,7 @@ export async function main(argv) {
   }
 
   if (cmd === 'auth') return cmdAuth(o, log);
+  if (cmd === 'diagnose') return cmdDiagnose(o, log);
   if (cmd === 'render') {
     rerender({ out: path.resolve(o.out ?? 'vk-archive'), log });
     return 0;
@@ -135,9 +141,69 @@ function makeApi(o, log) {
     version: o['api-version'] ?? '5.131',
     domain: o.domain ?? process.env.VK_DOMAIN ?? domain ?? 'vk.com',
     baseUrl: o['api-base'] ?? process.env.VK_API_BASE,
-    userAgent: appInfo?.userAgent,
+    userAgent: o['no-user-agent'] ? undefined : appInfo?.userAgent,
     log,
   });
+}
+
+/**
+ * Try users.get with the stored token across hosts, API versions and user agents,
+ * without retries, and print what VK answers. Meant for the case where whoami fails
+ * with something like [9] Flood control or [5] authorization failed.
+ */
+async function cmdDiagnose(o, log) {
+  const { token, app, domain } = resolveToken(o.token);
+  if (!token) throw new Error(`No access token. Run "vk-archive auth" first.`);
+  const appInfo = APPS[app ?? 'kate'];
+  const domains = o.domain ? [o.domain] : [domain ?? 'vk.ru', domain === 'vk.com' ? 'vk.ru' : 'vk.com'].filter((d, i, a) => a.indexOf(d) === i);
+  const versions = o['api-version'] ? [o['api-version']] : ['5.131', '5.199', '5.288'];
+  const agents = [
+    { label: `${appInfo?.name ?? 'app'} user-agent`, ua: appInfo?.userAgent, flag: '' },
+    { label: 'no user-agent', ua: undefined, flag: ' --no-user-agent' },
+  ];
+  const quiet = { info() {}, warn() {}, debug() {}, error() {} };
+  const results = [];
+  log.info(`Testing the stored token (${appInfo?.name ?? 'custom app'}) with users.get, one call per combination...\n`);
+  for (const d of domains) {
+    for (const v of versions) {
+      for (const a of agents) {
+        const api = new VkApi({ token, version: v, baseUrl: `https://api.${d}/method/`, userAgent: a.ua, maxRetries: 0, minInterval: 0, timeoutMs: 15000, log: quiet });
+        let outcome;
+        let ok = false;
+        try {
+          const [me] = await api.call('users.get');
+          outcome = `OK  (${me.first_name} ${me.last_name})`;
+          ok = true;
+        } catch (err) {
+          outcome = err.code ? `[${err.code}] ${err.body?.error_msg}` : `network: ${err.message}`;
+        }
+        log.info(`  api.${d.padEnd(6)}  v${v}  ${a.label.padEnd(24)}  ${outcome}`);
+        results.push({ domain: d, version: v, agent: a, ok, outcome });
+        await sleep(1200);
+      }
+    }
+  }
+  const good = results.find((r) => r.ok);
+  log.info('');
+  if (good) {
+    const flags = `--domain ${good.domain} --api-version ${good.version}${good.agent.flag}`;
+    log.info(`VK accepts the token with: ${flags}`);
+    log.info(`Run the archive with:\n\n  node bin/vk-archive.js run ${flags}\n`);
+    return 0;
+  }
+  const codes = new Set(results.map((r) => r.outcome.slice(0, 4)));
+  if (codes.has('[9] ')) {
+    log.info('Every combination answers "Flood control". VK is throttling this token, not the network.');
+    log.info('  1. Close every other Terminal window that may still be running the tool.');
+    log.info('  2. Wait 15-30 minutes without calling the API, then run "diagnose" again.');
+    log.info('  3. If it persists, get a token from a different official app and try again:');
+    log.info('       node bin/vk-archive.js auth --app android      (or --app iphone, --app vkadmin, --app vkme)');
+  } else if (codes.has('[5] ')) {
+    log.info('VK does not accept the token any more. Log in again: node bin/vk-archive.js auth');
+  } else {
+    log.info('No combination worked; see the answers above.');
+  }
+  return 1;
 }
 
 async function cmdAuth(o, log) {

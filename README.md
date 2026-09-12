@@ -114,6 +114,21 @@ If Kate Mobile is refused, try `--app android`, `--app iphone`, `--app vkadmin` 
 and run `auth` again. Two-factor authentication works normally because the login happens
 on vk.com.
 
+### "[9] Flood control" or "[5] User authorization failed" right after logging in
+
+VK answers this way when it dislikes the token itself, not the network. Run
+
+```bash
+node bin/vk-archive.js diagnose
+```
+
+It tries one `users.get` call per combination of host (`api.vk.ru` / `api.vk.com`),
+API version and user agent, with no retries, and prints the flags that work
+(for example `run --domain vk.ru --api-version 5.199 --no-user-agent`).
+If every line says "Flood control": make sure no other Terminal window is still running
+the tool, wait 15-30 minutes, and try again. If it still persists, get a token from
+another official app (`auth --app android`, `--app iphone`, `--app vkme`, `--app vkadmin`).
+
 The token can read everything in your account, so treat it like a password.
 Revoke it afterwards at vk.com -> Settings -> Security -> Application access
 (or just change your password).
