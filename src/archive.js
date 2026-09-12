@@ -24,7 +24,7 @@ export async function runArchive(opts) {
   }
 }
 
-async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurrency = 4, userAgent }) {
+async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurrency = 4, userAgent, hooks = {} }) {
   ensureDir(out);
   const namesPath = path.join(out, 'names.json');
   const names = NameBook.fromJSON(readJson(namesPath, null));
@@ -74,7 +74,11 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
 
   // Offline: the text is all here already, so build readable pages for every chat first
   // (media placeholders where needed); they are rebuilt as each chat's media completes.
-  if (offline) prerenderPages(out, peers, names, me, log);
+  if (offline) {
+    hooks.phase?.('pages');
+    prerenderPages(out, peers, names, me, log);
+    hooks.phase?.('media');
+  }
 
   const summary = [];
   let pendingDownload = Promise.resolve();
@@ -87,6 +91,7 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
     const tag = `[${i + 1}/${total}] ${peer.title} (${peer.peer_id})`;
     const entry = { ...peer, dir: relDir };
     summary.push(entry);
+    hooks.chat?.({ index: i + 1, total, title: peer.title, peer_id: peer.peer_id });
 
     // 1. history
     let state;
@@ -184,6 +189,7 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
         label: peer.title,
         retryFailed: flags.retryFailed,
         onProgress: (s) => {
+          hooks.media?.({ ...s, title: peer.title });
           if (Date.now() - lastLog > 5000) {
             log.info(`${tag}: media ${s.done + s.failed + s.skipped}/${s.total} (${formatBytes(s.bytes)})`);
             lastLog = Date.now();
@@ -204,6 +210,7 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
   await pendingDownload;
   writeIndex(out, summary, me);
   activity.set('computing messaging statistics over all chats');
+  hooks.phase?.('stats');
   writeStats(out, log);
   log.info(`\nDone. ${summary.length} chats.${offline ? '' : ` API calls: ${api.stats.calls} (${api.stats.retries} retries).`} Open ${path.join(out, 'index.html')}`);
   return summary;

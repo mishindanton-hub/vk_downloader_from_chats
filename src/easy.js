@@ -3,15 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-import { fileURLToPath } from 'node:url';
 import { runArchive } from './archive.js';
+import { assetPath, readAsset } from './assets.js';
 import { loadConfig, saveConfig } from './config.js';
-import { importExport } from './import.js';
-import { activity, ensureDir, readJson, sleep, startHeartbeat, writeJson } from './util.js';
+import { watchDownloads } from './watch.js';
+import { activity, ensureDir, readJson } from './util.js';
 
-const BROWSER_SCRIPT = fileURLToPath(new URL('../browser-export.js', import.meta.url));
 const VK_URL = 'https://vk.ru/im';
-const PART_RE = /^vk-export-\d+\.json$/;
 
 /**
  * The one-button flow used by the launchers:
@@ -46,8 +44,6 @@ export async function runEasy({ out: outFlag, downloads: dlFlag, log, flags = {}
 
   // 2. new export or continue?
   const existing = readJson(path.join(out, 'conversations.json'), null);
-  const trackerPath = path.join(out, 'imported-parts.json');
-  const imported = readJson(trackerPath, {}) ?? {};
   let mode = 'export';
   if (existing?.length) {
     const a = (await ask(`This folder already holds an archive with ${existing.length} chats.\n  [1] Continue: download any media still missing and rebuild the pages (default)\n  [2] Export the chats from the browser again (new messages, or first export did not finish)\n> `)).trim();
@@ -56,7 +52,7 @@ export async function runEasy({ out: outFlag, downloads: dlFlag, log, flags = {}
   }
 
   if (mode === 'export') {
-    const script = fs.readFileSync(BROWSER_SCRIPT, 'utf8');
+    const script = readAsset('browser-export.js');
     const copied = copyToClipboard(script);
     say(`
 Now the browser does the reading, using your normal VK login (no password is typed here).
@@ -67,7 +63,7 @@ Now the browser does the reading, using your normal VK login (no password is typ
        Safari:  Safari > Settings > Advanced > tick "Show features for web developers",
                 then press  Cmd+Option+C
        Firefox: press  Cmd+Option+K   (Windows: Ctrl+Shift+K)
-  3. ${copied ? 'The script is already on your clipboard: click into the console, press Cmd+V (Windows: Ctrl+V)' : `Open the file\n       ${BROWSER_SCRIPT}\n     in a text editor, copy ALL of it, paste it into the console`}
+  3. ${copied ? 'The script is already on your clipboard: click into the console, press Cmd+V (Windows: Ctrl+V)' : `Open the file\n       ${assetPath('browser-export.js')}\n     in a text editor, copy ALL of it, paste it into the console`}
      and press Enter.
      If Chrome answers "allow pasting": type  allow pasting  , press Enter, and paste again.
   4. Leave the tab open. It prints [vk-archive] lines and saves files named
@@ -85,52 +81,19 @@ arrived so far. Ctrl+C quits (run again later; nothing is lost).
     const startedAt = Date.now();
     // Ignore a stray Enter left over from the folder prompt.
     rl.on('line', () => { if (Date.now() - startedAt > 3000) enterPressed = true; });
-    const sizes = new Map();
-    let done = false;
     let lastNote = 0;
-    let partsSeen = Object.keys(imported).length;
-    while (!done && !enterPressed) {
-      const names = fs.readdirSync(downloads).filter((n) => PART_RE.test(n)).sort();
-      for (const name of names) {
-        const file = path.join(downloads, name);
-        const st = fs.statSync(file);
-        const key = `${name}:${st.size}:${Math.floor(st.mtimeMs)}`;
-        if (imported[key]) continue;
-        // Wait until the size is stable, then check the file parses (still being written otherwise).
-        if (sizes.get(name) !== st.size) { sizes.set(name, st.size); continue; }
-        let data;
-        try {
-          data = JSON.parse(fs.readFileSync(file, 'utf8'));
-        } catch {
-          continue;
+    const { done } = await watchDownloads({
+      downloads,
+      out,
+      log,
+      shouldStop: () => enterPressed,
+      onIdle: ({ parts }) => {
+        if (Date.now() - lastNote > 30000) {
+          say(`  ... waiting for export files in ${downloads} (${parts} received so far). The browser saves one file per 10 chats; big chats take minutes each. Press Enter to continue without waiting.`);
+          lastNote = Date.now();
         }
-        if (data?.format !== 'vk-archive-export/1') {
-          say(`  ${name} is not a VK Archive export file; ignoring it.`);
-          imported[key] = { ignored: true };
-          continue;
-        }
-        say(`  importing ${name} (${(st.size / 1048576).toFixed(0)} MB) ...`);
-        activity.set(`importing ${name}`);
-        const stopHb = startHeartbeat(log);
-        let res;
-        try {
-          res = importExport({ files: [file], out, log: quiet(log) });
-        } finally {
-          stopHb();
-          activity.clear();
-        }
-        partsSeen += 1;
-        imported[key] = { imported_at: new Date().toISOString(), chats: res.chats, part: data.part, done: Boolean(data.done) };
-        writeJson(trackerPath, imported);
-        say(`  + ${name}: ${res.chats} chats, ${res.messages} messages imported${data.done ? ' (last part)' : ''}`);
-        if (data.done) done = true;
-      }
-      if (!done && Date.now() - lastNote > 30000) {
-        say(`  ... waiting for export files in ${downloads} (${partsSeen} received so far). The browser saves one file per 10 chats; big chats take minutes each. Press Enter to continue without waiting.`);
-        lastNote = Date.now();
-      }
-      if (!done) await sleep(2000);
-    }
+      },
+    });
     rl.removeAllListeners('line');
     if (!done && !readJson(path.join(out, 'conversations.json'), null)?.length) {
       say('\nNothing was imported. Run this again once the browser has saved at least one vk-export file.');

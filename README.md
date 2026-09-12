@@ -33,55 +33,58 @@ allowed to read messages, and that is a one-time, two-minute step described belo
 
 ## Beginner guide (no programming needed)
 
-The whole thing is one launcher. It works without a VK API token: your browser reads
-the chats through your normal login, and the launcher downloads all the files.
+Everything happens on one page in your browser. No terminal, no typing, except one
+paste into VK's page (VK only lets your logged-in browser read messages).
 
-1. **Install Node.js.** Open https://nodejs.org, download the "LTS" installer, run it.
-   That is the only thing to install.
-2. **Get this folder.** On the GitHub page click the green **Code** button, then
-   **Download ZIP**, and unpack it (double-click on macOS).
-3. **Double-click the launcher.** `VK Archive.command` on macOS, `VK Archive.bat` on
-   Windows. A terminal window opens and guides you.
-   - macOS blocks it the first time because it is not signed by Apple. On macOS 15 and
-     newer the dialog says *"Apple could not verify ... is free of malware"*: click
-     **Done**, open **System Settings → Privacy & Security**, scroll to the **Security**
-     section, click **Open Anyway** next to the message about the blocked file, confirm
-     with your password, and double-click the file again. On older macOS, right-click
-     the file, choose **Open**, then **Open** again.
-4. **Choose where to save.** The window asks for a folder. Press Enter for the default
-   (`VK Archive` in your home folder) or drag any folder from Finder into the window and
-   press Enter. The choice is remembered for next time and asked again on every run, so it
-   is easy to change.
-5. **Let the browser read the chats.** A tab with https://vk.ru/im opens; log in if
-   needed. Open the JavaScript console on that tab (Chrome: Cmd+Option+J, Windows:
-   Ctrl+Shift+J; Safari: enable **Settings → Advanced → Show features for web developers**
-   once, then Cmd+Option+C). The export script is already on your clipboard: click into
-   the console, paste, press Enter. If Chrome says "allow pasting", type `allow pasting`,
-   press Enter, then paste again. Leave the tab open: it walks every chat, prints
-   `[vk-archive]` progress lines, and saves `vk-export-001.json`, `vk-export-002.json`, ...
-   into your Downloads folder (allow multiple downloads if asked).
-6. **Wait.** The launcher window notices each file as it lands, and once the last one is in
-   it downloads every photo, video, voice message and document into your folder and builds
-   the pages. This can take hours for a big account. You can close the window at any time
-   and double-click the launcher again later: it continues where it stopped and never
-   downloads the same file twice.
-7. **Look at the result.** It opens `index.html` in your archive folder when done. Every
-   chat is there with messages, photos, voice messages and videos, all working offline.
-   Copy the folder anywhere; it does not depend on VK or on this tool.
+### Get it
 
-Running the launcher again later offers two choices: continue the existing archive
-(download anything still missing, rebuild the pages), or export from the browser again to
-pick up new messages.
+- **Ready-made app (no Node.js needed):** download the ZIP for your computer from the
+  [Releases](../../releases) page (or the latest build under "Actions"), unzip it.
+- **Or from source:** click the green **Code** button → **Download ZIP**, unzip, and install
+  Node.js once from https://nodejs.org (the "LTS" installer, click through).
+
+### Start it
+
+- **macOS:** double-click `VK Archive.app`. The first time macOS blocks it because it is
+  not signed by Apple ("Apple could not verify ... is free of malware"): click **Done**,
+  open **System Settings → Privacy & Security**, scroll down to the **Security** section,
+  click **Open Anyway** next to the message, confirm with your password, and double-click
+  the app again. This is needed once. On older macOS: right-click → **Open** → **Open**.
+- **Windows:** double-click `VK Archive.bat`. If Windows says "Windows protected your PC",
+  click **More info** → **Run anyway**. A small minimized window keeps the service running.
+
+Your browser opens the VK Archive page:
+
+![VK Archive page](docs/gui.png)
+
+### Use it
+
+1. **Where to save.** Press Save to accept the suggested folder or type another one.
+   Anything already in the folder is continued, never downloaded twice.
+2. **Let your browser read the chats.** Click **Copy the script & open VK**. A VK tab opens;
+   log in if needed. Open the browser console on that tab (the page shows the exact keys
+   for your browser), paste, press Enter. Leave the tab open: it walks every chat, prints
+   `[vk-archive]` progress lines and saves `vk-export-001.json`, `002`, … to Downloads.
+   The VK Archive page notices each file by itself and shows how many chats have arrived.
+3. **Download photos, videos and files.** Starts automatically when the browser finishes
+   (or press the button to start with what has arrived). A progress bar shows chat X of N.
+   This can take hours for a big account. Close the page or quit whenever you like and
+   start the app again later: it continues where it stopped.
+4. **Open the chats** and **Messaging statistics** links on the page show the result;
+   the folder itself opens in any browser via `index.html`, and works forever without VK.
+
+Prefer a terminal? `VK Archive (Terminal).command` on macOS runs the same flow as a
+text conversation, and every step is also a command (see below).
 
 ### If something goes wrong
 
 - **The console prints an error instead of `[vk-archive]` lines.** Make sure you are on
   the messenger page (`/im`) of vk.ru or vk.com and logged in, then paste again.
 - **The browser tab was closed halfway.** Open `browser-export.js`, set `startFrom:` at
-  the top to the number the console printed, and paste it again; the launcher picks up
-  the new files.
-- **Nothing appears in Downloads.** Check the browser's download location; you can point
-  the launcher elsewhere with `--downloads /path` (see Terminal use below).
+  the top to the number the console printed, and paste it again; the page picks up the
+  new files.
+- **Nothing appears in Downloads.** Check the browser's download location and set it in
+  step 1 of the page.
 - **Advanced: token route.** The older way, an API token through the OAuth login of an
   official VK app, is still in the tool (`auth`, `whoami`, `diagnose`, `run`), but VK now
   often refuses such tokens with "Flood control". It is documented further down.
@@ -99,7 +102,8 @@ node bin/vk-archive.js run       # archive everything into ./vk-archive
 Token-free (what the launchers do):
 
 ```bash
-node bin/vk-archive.js easy                    # guided: browser export -> import -> media
+node bin/vk-archive.js gui                     # the point-and-click page (default with no command)
+node bin/vk-archive.js easy                    # the same flow as a terminal conversation
 node bin/vk-archive.js easy --out ~/Desktop/VK --downloads ~/Downloads
 # or the pieces by hand:
 node bin/vk-archive.js browser                 # steps + script on the clipboard
@@ -250,8 +254,13 @@ Photos are downloaded at the largest available size. A photo forwarded ten times
 ## Development
 
 ```bash
-npm test     # runs the unit tests and an end-to-end run against a local fake VK API
+npm test               # unit tests + end-to-end runs against a local fake VK API (CLI, browser export, GUI)
+npm run build:sea      # standalone executable for this OS into dist/ (Node 20+, esbuild + postject)
 ```
+
+`.github/workflows/build.yml` runs the tests and builds the macOS (Apple Silicon, Intel)
+and Windows packages on every push; pushing a tag `vX.Y` publishes them as a GitHub Release.
+The binaries are ad-hoc signed only, hence the one-time "Open Anyway" / "Run anyway".
 
 `test/fake-vk.js` implements just enough of `messages.getConversations`,
 `messages.getHistory`, `video.get`, `users.get`, `groups.getById` and a file host to exercise

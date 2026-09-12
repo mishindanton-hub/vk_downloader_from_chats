@@ -3,3 +3,4 @@ vk-archive/
 *.part
 .DS_Store
 .vk-archiver.json
+dist/

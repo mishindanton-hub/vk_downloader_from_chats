@@ -2,13 +2,14 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import readline from 'node:readline';
-import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { VkApi } from './api.js';
 import { rerender, runArchive } from './archive.js';
+import { assetPath, readAsset } from './assets.js';
 import { APPS, buildAuthUrl, parseTokenInput } from './auth.js';
 import { CONFIG_FILE, loadConfig, resolveToken, saveConfig } from './config.js';
 import { runEasy } from './easy.js';
+import { startGui } from './gui.js';
 import { importExport } from './import.js';
 import { NameBook, listConversations } from './peers.js';
 import { writeStats } from './stats.js';
@@ -17,6 +18,9 @@ import { formatDate, makeLogger, sleep } from './util.js';
 const HELP = `vk-archive: offload all your VK conversations (text + media) to disk.
 
 Usage:
+  vk-archive gui [--out DIR] [--downloads DIR] [--port N]
+        The point-and-click interface the launchers open: a local page in your browser
+        with the steps, progress, and the finished archive.
   vk-archive easy [--out DIR] [--downloads DIR]
         The one-button flow the launchers use: asks where to save, opens VK in the
         browser with the export script on the clipboard, imports the exported files
@@ -88,13 +92,16 @@ const OPTIONS = {
   'no-user-agent': { type: 'boolean' },
   offline: { type: 'boolean' },
   downloads: { type: 'string' },
+  port: { type: 'string' },
+  'no-open': { type: 'boolean' },
   verbose: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
 };
 
 export async function main(argv) {
   const { values: o, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
-  const cmd = positionals[0] ?? 'help';
+  // No command (a double-clicked app or executable) opens the point-and-click interface.
+  const cmd = positionals[0] ?? (o.help ? 'help' : 'gui');
   const log = makeLogger(Boolean(o.verbose));
   if (o.help || cmd === 'help') {
     console.log(HELP);
@@ -112,6 +119,12 @@ export async function main(argv) {
     return 0;
   }
   if (cmd === 'browser') return cmdBrowser(log);
+  if (cmd === 'gui') {
+    await startGui({ out: o.out, downloads: o.downloads, port: o.port ? Number(o.port) : 0, open: !o['no-open'], flags: runFlags(o), concurrency: o.concurrency ? Number(o.concurrency) : 4, log });
+    // Keep serving until the page's Quit button (or Ctrl+C).
+    await new Promise(() => {});
+    return 0;
+  }
   if (cmd === 'easy') {
     return runEasy({
       out: o.out,
@@ -283,11 +296,10 @@ async function cmdAuth(o, log) {
   return 0;
 }
 
-const BROWSER_SCRIPT = new URL('../browser-export.js', import.meta.url);
 
 /** Explain the browser route and put the console script on the clipboard where we can. */
 async function cmdBrowser(log) {
-  const script = fs.readFileSync(BROWSER_SCRIPT, 'utf8');
+  const script = readAsset('browser-export.js');
   let copied = false;
   if (process.platform === 'darwin') {
     try {
@@ -305,7 +317,7 @@ async function cmdBrowser(log) {
              then Develop > Show JavaScript Console (Cmd+Option+C).
      Chrome: View > Developer > JavaScript Console (Cmd+Option+J).
 3. Paste the script and press Enter.
-     ${copied ? 'It is already on your clipboard, just press Cmd+V in the console.' : `Copy the whole file ${fileURLToPath(BROWSER_SCRIPT)} and paste it.`}
+     ${copied ? 'It is already on your clipboard, just press Cmd+V in the console.' : `Copy the whole file ${assetPath('browser-export.js')} and paste it.`}
    If the console refuses the paste, type "allow pasting" first (Chrome asks for this once).
 4. Watch the [vk-archive] lines. It walks every conversation and saves files named
    vk-export-001.json, vk-export-002.json, ... into your Downloads folder. Allow multiple

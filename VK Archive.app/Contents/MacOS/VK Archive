@@ -1,0 +1,26 @@
+#!/bin/bash
+# VK Archive for macOS. Double-click the app: it starts the local VK Archive
+# service in the background and opens the interface in your browser.
+# Runs the bundled standalone binary when present (release download), otherwise
+# Node.js with the source next to the app (repository ZIP).
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/../../.." && pwd)"
+LOG="$HOME/Library/Logs/VK Archive.log"
+mkdir -p "$(dirname "$LOG")"
+export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/local/bin:$PATH"
+
+fail() {
+  osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with title \"VK Archive\" with icon caution" >/dev/null 2>&1
+}
+
+if [ -x "$DIR/vk-archive" ]; then
+  "$DIR/vk-archive" gui >>"$LOG" 2>&1 || fail "VK Archive stopped unexpectedly. Details are in $LOG"
+  exit 0
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  fail "VK Archive needs Node.js (free, one-time install). Click OK to open nodejs.org, install the LTS version, then open VK Archive again."
+  open "https://nodejs.org"
+  exit 1
+fi
+node "$ROOT/bin/vk-archive.js" gui >>"$LOG" 2>&1 || fail "VK Archive stopped unexpectedly. Details are in $LOG"

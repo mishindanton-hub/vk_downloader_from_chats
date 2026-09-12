@@ -1,0 +1,105 @@
+name: Build standalone apps
+
+# Builds "VK Archive" as a single executable for macOS (Apple Silicon and Intel)
+# and Windows, so friends do not need to install Node.js. Every push builds and
+# keeps the results as workflow artifacts; a tag like v1.0 also publishes them
+# as a GitHub Release.
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macOS-Apple-Silicon
+          - os: macos-13
+            name: macOS-Intel
+          - os: windows-latest
+            name: Windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: node scripts/build-sea.mjs --out dist
+
+      - name: Assemble macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -e
+          mkdir -p "pkg"
+          cp -R "VK Archive.app" "pkg/VK Archive.app"
+          cp dist/vk-archive "pkg/VK Archive.app/Contents/MacOS/vk-archive"
+          chmod +x "pkg/VK Archive.app/Contents/MacOS/vk-archive" "pkg/VK Archive.app/Contents/MacOS/VK Archive"
+          cp browser-export.js "pkg/browser-export.js"
+          cat > "pkg/READ ME.txt" <<'EOF'
+          VK Archive for macOS
+
+          1. Double-click "VK Archive.app". Your browser opens the VK Archive page.
+             The first time macOS blocks it ("Apple could not verify..."): click Done,
+             open System Settings > Privacy & Security, scroll down, click "Open Anyway",
+             then double-click the app again.
+          2. Follow the three steps on the page.
+
+          Quit with the "Quit VK Archive" button on the page.
+          browser-export.js is the script the page copies for you (kept here as a backup).
+          EOF
+          cd pkg && ditto -c -k --keepParent --sequesterRsrc "VK Archive.app" "../VK-Archive-${{ matrix.name }}.zip"
+          cd .. && zip -j "VK-Archive-${{ matrix.name }}.zip" "pkg/READ ME.txt" "pkg/browser-export.js"
+
+      - name: Assemble Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item "dist/VK Archive.exe" "pkg/VK Archive.exe"
+          Copy-Item "VK Archive.bat" "pkg/VK Archive.bat"
+          Copy-Item "browser-export.js" "pkg/browser-export.js"
+          @"
+          VK Archive for Windows
+
+          1. Double-click "VK Archive.bat" (or "VK Archive.exe"). A small window starts the
+             service and your browser opens the VK Archive page.
+             If Windows shows "Windows protected your PC": click "More info", then "Run anyway".
+          2. Follow the three steps on the page.
+
+          Quit with the "Quit VK Archive" button on the page.
+          browser-export.js is the script the page copies for you (kept here as a backup).
+          "@ | Set-Content -Path "pkg/READ ME.txt"
+          Compress-Archive -Path pkg/* -DestinationPath "VK-Archive-${{ matrix.name }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VK-Archive-${{ matrix.name }}
+          path: VK-Archive-${{ matrix.name }}.zip
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release upload "${GITHUB_REF_NAME}" "VK-Archive-${{ matrix.name }}.zip" --clobber || gh release create "${GITHUB_REF_NAME}" "VK-Archive-${{ matrix.name }}.zip" --title "VK Archive ${GITHUB_REF_NAME}" --notes "Standalone apps. macOS: unzip, double-click VK Archive.app (System Settings > Privacy & Security > Open Anyway the first time). Windows: unzip, double-click VK Archive.bat (More info > Run anyway if SmartScreen asks)."
