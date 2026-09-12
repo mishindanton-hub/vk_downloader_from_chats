@@ -10,6 +10,11 @@ on:
     branches: ['**']
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish a GitHub Release with this tag (e.g. v1.0); the tag is created at the built commit'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -98,11 +103,21 @@ jobs:
           path: VK-Archive-${{ matrix.name }}.zip
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.release || github.ref_name }}
         shell: bash
         run: |
           NOTES='Standalone apps. macOS: unzip, double-click "VK Archive.app" (System Settings > Privacy & Security > Open Anyway the first time). Windows: unzip, double-click "VK Archive.bat" (More info > Run anyway if SmartScreen asks).'
-          gh release upload "${GITHUB_REF_NAME}" "VK-Archive-${{ matrix.name }}.zip" --clobber \
-            || gh release create "${GITHUB_REF_NAME}" "VK-Archive-${{ matrix.name }}.zip" --title "VK Archive ${GITHUB_REF_NAME}" --notes "$NOTES"
+          ASSET="VK-Archive-${{ matrix.name }}.zip"
+          # The three platform jobs race to create the release; whoever loses just uploads.
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" "$ASSET" --clobber && exit 0
+            else
+              gh release create "$TAG" "$ASSET" --target "$GITHUB_SHA" --title "VK Archive $TAG" --notes "$NOTES" && exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 1
