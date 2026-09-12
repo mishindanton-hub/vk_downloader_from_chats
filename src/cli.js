@@ -8,6 +8,7 @@ import { VkApi } from './api.js';
 import { rerender, runArchive } from './archive.js';
 import { APPS, buildAuthUrl, parseTokenInput } from './auth.js';
 import { CONFIG_FILE, loadConfig, resolveToken, saveConfig } from './config.js';
+import { runEasy } from './easy.js';
 import { importExport } from './import.js';
 import { NameBook, listConversations } from './peers.js';
 import { formatDate, makeLogger, sleep } from './util.js';
@@ -15,6 +16,10 @@ import { formatDate, makeLogger, sleep } from './util.js';
 const HELP = `vk-archive: offload all your VK conversations (text + media) to disk.
 
 Usage:
+  vk-archive easy [--out DIR] [--downloads DIR]
+        The one-button flow the launchers use: asks where to save, opens VK in the
+        browser with the export script on the clipboard, imports the exported files
+        as they land in Downloads, then downloads all media and opens the result.
   vk-archive auth [--app kate|android|iphone|vkme|vkadmin] [--app-id N]
         Print the login URL, then paste the resulting URL back to store the token.
   vk-archive whoami
@@ -79,6 +84,7 @@ const OPTIONS = {
   'retry-failed': { type: 'boolean' },
   'no-user-agent': { type: 'boolean' },
   offline: { type: 'boolean' },
+  downloads: { type: 'string' },
   verbose: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
 };
@@ -99,6 +105,15 @@ export async function main(argv) {
     return 0;
   }
   if (cmd === 'browser') return cmdBrowser(log);
+  if (cmd === 'easy') {
+    return runEasy({
+      out: o.out,
+      downloads: o.downloads,
+      log,
+      flags: runFlags(o),
+      concurrency: o.concurrency ? Number(o.concurrency) : 4,
+    });
+  }
   if (cmd === 'import') {
     importExport({ files: positionals.slice(1), out: path.resolve(o.out ?? 'vk-archive'), log });
     log.info(`\nNow run: node bin/vk-archive.js run --offline`);
@@ -123,18 +138,7 @@ export async function main(argv) {
     return 0;
   }
   if (cmd === 'run') {
-    const flags = {
-      textOnly: o['text-only'],
-      noVideo: o['no-video'],
-      noPhotos: o['no-photos'],
-      noDocs: o['no-docs'],
-      noVoice: o['no-voice'],
-      noStickers: o['no-stickers'],
-      noMusic: o['no-music'],
-      skipGroups: o['skip-groups'],
-      retryFailed: o['retry-failed'],
-      maxVideoQuality: o['max-video-quality'] ? Number(o['max-video-quality']) : undefined,
-    };
+    const flags = runFlags(o);
     await runArchive({
       api,
       out: path.resolve(o.out ?? 'vk-archive'),
@@ -148,6 +152,21 @@ export async function main(argv) {
   }
   console.error(`Unknown command "${cmd}".\n\n${HELP}`);
   return 2;
+}
+
+function runFlags(o) {
+  return {
+    textOnly: o['text-only'],
+    noVideo: o['no-video'],
+    noPhotos: o['no-photos'],
+    noDocs: o['no-docs'],
+    noVoice: o['no-voice'],
+    noStickers: o['no-stickers'],
+    noMusic: o['no-music'],
+    skipGroups: o['skip-groups'],
+    retryFailed: o['retry-failed'],
+    maxVideoQuality: o['max-video-quality'] ? Number(o['max-video-quality']) : undefined,
+  };
 }
 
 function makeApi(o, log) {
