@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { collectMedia, pickVideoFile } from './attachments.js';
+import { collectMedia, datedRel, pickVideoFile } from './attachments.js';
 import { downloadAll } from './download.js';
 import { fetchHistory, readMessages } from './history.js';
 import { NameBook, listConversations, peerDir } from './peers.js';
@@ -61,6 +61,10 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
     for (const id of missing) peers.push({ peer_id: id, kind: id > 2000000000 ? 'chat' : id < 0 ? 'group' : 'user', title: names.name(id) });
   }
   if (flags.skipGroups) peers = peers.filter((p) => p.kind !== 'group');
+
+  // Offline: the text is all here already, so build readable pages for every chat first
+  // (media placeholders where needed); they are rebuilt as each chat's media completes.
+  if (offline) prerenderPages(out, peers, names, me, log);
 
   const summary = [];
   let pendingDownload = Promise.resolve();
@@ -135,7 +139,7 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
     if (!flags.noVideo && media.videos.length) {
       const resolved = await resolveVideos(api, media.videos, flags.maxVideoQuality ?? 2160, log, videoCache);
       for (const v of resolved) {
-        if (v.url) media.jobs.push({ key: v.key, kind: 'video', url: v.url, rel: `media/videos/${v.key}_${v.quality}p.${extFromUrl(v.url, 'mp4')}`, title: v.title, msg_id: v.msg_id });
+        if (v.url) media.jobs.push({ key: v.key, kind: 'video', url: v.url, rel: datedRel(`media/videos/${v.key}_${v.quality}p.${extFromUrl(v.url, 'mp4')}`, v.date), title: v.title, msg_id: v.msg_id, date: v.date });
         else videoLinks.push({ key: v.key, title: v.title, url: v.link, reason: v.reason });
       }
     }
@@ -188,6 +192,32 @@ export async function runArchive({ api, out, log, peerFilter, flags = {}, concur
   writeStats(out, log);
   log.info(`\nDone. ${summary.length} chats.${offline ? '' : ` API calls: ${api.stats.calls} (${api.stats.retries} retries).`} Open ${path.join(out, 'index.html')}`);
   return summary;
+}
+
+function prerenderPages(out, peers, names, me, log) {
+  const todo = peers.filter((peer) => {
+    const dir = peerDir(out, peer);
+    return fs.existsSync(path.join(dir, 'messages.jsonl')) && !fs.existsSync(path.join(dir, 'messages.html'));
+  });
+  if (!todo.length) return;
+  log.info(`Building readable pages for ${todo.length} chats before downloading media...`);
+  const summary = [];
+  let lastLog = 0;
+  for (const [i, peer] of todo.entries()) {
+    const dir = peerDir(out, peer);
+    const messages = readMessages(path.join(dir, 'messages.jsonl'));
+    const index = readJson(path.join(dir, 'media-index.json'), {}) ?? {};
+    writeChatOutputs({ dir, peer, messages, names, index, me: me.id, videoLinks: [], links: [] });
+    summary.push({ ...peer, dir: path.basename(dir), message_count: messages.length, media_ok: 0, media_failed: 0, status: 'text only, media pending' });
+    if (Date.now() - lastLog > 5000) {
+      log.info(`  pages ${i + 1}/${todo.length}`);
+      lastLog = Date.now();
+    }
+  }
+  const existing = readJson(path.join(out, 'summary.json'), []) ?? [];
+  const seen = new Set(summary.map((s) => s.peer_id));
+  writeIndex(out, [...existing.filter((s) => !seen.has(s.peer_id)), ...summary], me);
+  log.info(`  pages done; open ${path.join(out, 'index.html')} any time while media downloads`);
 }
 
 function writeIndex(out, summary, me) {

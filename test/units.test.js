@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { VkApi } from '../src/api.js';
+import { downloadAll } from '../src/download.js';
 import { bestPhotoUrl, collectMedia, pickVideoFile } from '../src/attachments.js';
 import { buildAuthUrl, parseTokenInput } from '../src/auth.js';
 import { formatText } from '../src/render.js';
@@ -121,5 +125,26 @@ describe('VkApi host fallback', () => {
     const u = new URL(buildAuthUrl({ domain: 'vk.ru' }));
     assert.equal(u.host, 'oauth.vk.ru');
     assert.equal(u.searchParams.get('redirect_uri'), 'https://oauth.vk.ru/blank.html');
+  });
+});
+
+describe('media naming', () => {
+  it('renames files downloaded under the old name to the dated name without re-downloading', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-rename-'));
+    fs.mkdirSync(path.join(dir, 'media/photos'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'media/photos/photo1_1.jpg'), 'x');
+    fs.writeFileSync(path.join(dir, 'media-index.json'), JSON.stringify({ photo1_1: { status: 'ok', path: 'media/photos/photo1_1.jpg', kind: 'photo' } }));
+    let fetched = 0;
+    const fetchImpl = async () => { fetched += 1; throw new Error('should not fetch'); };
+    const job = { key: 'photo1_1', kind: 'photo', url: 'http://x/a.jpg', rel: 'media/photos/2020-01-02_photo1_1.jpg', date: 1577923200 };
+    const { index, stats } = await downloadAll([job], { dir, log: { warn() {} }, fetchImpl });
+    assert.equal(fetched, 0);
+    assert.equal(stats.skipped, 1);
+    assert.equal(index.photo1_1.path, 'media/photos/2020-01-02_photo1_1.jpg');
+    assert.ok(fs.existsSync(path.join(dir, 'media/photos/2020-01-02_photo1_1.jpg')));
+    assert.ok(!fs.existsSync(path.join(dir, 'media/photos/photo1_1.jpg')));
+    assert.equal(Math.floor(fs.statSync(path.join(dir, 'media/photos/2020-01-02_photo1_1.jpg')).mtimeMs / 1000), 1577923200);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'media-index.json'), 'utf8')).photo1_1.path, 'media/photos/2020-01-02_photo1_1.jpg');
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

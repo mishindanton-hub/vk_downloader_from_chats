@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { VkApi } from '../src/api.js';
 import { rerender, runArchive } from '../src/archive.js';
+import { formatDay } from '../src/util.js';
 import { startFakeVk, TOKEN } from './fake-vk.js';
 
 const silent = { info() {}, warn() {}, debug() {}, error() {} };
@@ -63,7 +64,9 @@ describe('end-to-end archive against a fake VK', () => {
     const failed = Object.entries(index).filter(([, r]) => r.status === 'failed');
 
     // 45 photos every 10th message, minus the broken one (33 isn't a multiple of 10 so it's extra) -> 45 + flaky
-    assert.equal(index['photo2_10'].path, 'media/photos/photo2_10.jpg');
+    const day10 = formatDay(1400000000 + 10 * 3600);
+    assert.equal(index['photo2_10'].path, `media/photos/${day10}_photo2_10.jpg`, 'file name carries the message date');
+    assert.equal(Math.floor(fs.statSync(path.join(dir, index['photo2_10'].path)).mtimeMs / 1000), 1400000000 + 10 * 3600, 'mtime is the message date');
     assert.ok(index['photo2_10'].url.endsWith('/files/photo2_10.jpg'), 'largest size chosen');
     assert.ok(fs.existsSync(path.join(dir, index['photo2_10'].path)));
     assert.equal(index['photo2_35'].status, 'ok', 'flaky download retried');
@@ -74,10 +77,10 @@ describe('end-to-end archive against a fake VK', () => {
     assert.equal(index['photo2_33'].permanent, true);
     assert.equal(failed.length, 1);
 
-    assert.equal(index['doc2_5'].path, 'media/docs/doc2_5_report.pdf');
-    assert.equal(index['am2_7'].path, 'media/voice/am2_7.mp3');
+    assert.match(index['doc2_5'].path, /^media\/docs\/\d{4}-\d{2}-\d{2}_doc2_5_report\.pdf$/);
+    assert.match(index['am2_7'].path, /^media\/voice\/\d{4}-\d{2}-\d{2}_am2_7\.mp3$/);
     assert.ok(index['sticker9'].url.endsWith('sticker9_512.png'));
-    assert.equal(index['video2_11'].path, 'media/videos/video2_11_720p.mp4', 'max quality respected');
+    assert.match(index['video2_11'].path, /^media\/videos\/\d{4}-\d{2}-\d{2}_video2_11_720p\.mp4$/, 'max quality respected');
     assert.equal(index['video2_11_thumb'].status, 'ok');
     assert.equal(index['photo5_1'].status, 'ok', 'photo inside forwarded message');
     assert.equal(index['photo-100_3'].status, 'ok', 'photo inside wall post');
@@ -106,9 +109,9 @@ describe('end-to-end archive against a fake VK', () => {
     const html = fs.readFileSync(path.join(dir, 'messages.html'), 'utf8');
     assert.match(html, /Alice A/);
     assert.match(html, /User5 Resolved/, 'unknown forwarded author resolved through users.get');
-    assert.match(html, /src="media\/photos\/photo2_10\.jpg"/);
-    assert.match(html, /<video controls[^>]+src="media\/videos\/video2_11_720p\.mp4"/);
-    assert.match(html, /<audio controls[^>]+src="media\/voice\/am2_7\.mp3"/);
+    assert.match(html, /src="media\/photos\/\d{4}-\d{2}-\d{2}_photo2_10\.jpg"/);
+    assert.match(html, /<video controls[^>]+src="media\/videos\/\d{4}-\d{2}-\d{2}_video2_11_720p\.mp4"/);
+    assert.match(html, /<audio controls[^>]+src="media\/voice\/\d{4}-\d{2}-\d{2}_am2_7\.mp3"/);
     assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/, 'text is escaped');
     assert.doesNotMatch(html, /<script>alert/);
     assert.match(html, /<a href="https:\/\/vk\.com\/id2">Alice<\/a>/, 'mentions linkified');
@@ -119,7 +122,7 @@ describe('end-to-end archive against a fake VK', () => {
 
     const txt = fs.readFileSync(path.join(dir, 'messages.txt'), 'utf8');
     assert.match(txt, /\] Me Self: msg 1\n/);
-    assert.match(txt, /\[doc: report\.pdf -> media\/docs\/doc2_5_report\.pdf\]/);
+    assert.match(txt, /\[doc: report\.pdf -> media\/docs\/\d{4}-\d{2}-\d{2}_doc2_5_report\.pdf\]/);
 
     const chatHtml = fs.readFileSync(path.join(out, dirOf(2000000001), 'messages.html'), 'utf8');
     assert.match(chatHtml, /Me Self created the chat &quot;Test Chat&quot;/);

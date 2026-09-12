@@ -1,4 +1,4 @@
-import { extFromUrl, sanitizeName } from './util.js';
+import { extFromUrl, formatDay, sanitizeName } from './util.js';
 
 /**
  * Walks every message (including forwarded messages, replies and wall posts inside
@@ -17,6 +17,7 @@ export function collectMedia(messages, opts = {}) {
 
   const add = (job) => {
     if (!job || !job.key) return;
+    if (job.date) job.rel = datedRel(job.rel, job.date);
     if (!jobs.has(job.key)) jobs.set(job.key, job);
   };
 
@@ -27,7 +28,7 @@ export function collectMedia(messages, opts = {}) {
     if (msg.reply_message) walk(msg.reply_message, depth + 1);
     if (msg.action?.photo) {
       const url = msg.action.photo.photo_200 || msg.action.photo.photo_100 || msg.action.photo.photo_50;
-      if (url) add({ key: `chatphoto${msg.id}`, kind: 'photo', url, rel: `media/other/chat_photo_${msg.id}.${extFromUrl(url, 'jpg')}`, msg_id: msg.id });
+      if (url) add({ key: `chatphoto${msg.id}`, kind: 'photo', url, rel: `media/other/chat_photo_${msg.id}.${extFromUrl(url, 'jpg')}`, msg_id: msg.id, date: msg.date });
     }
   };
 
@@ -51,7 +52,7 @@ export function collectMedia(messages, opts = {}) {
           videos.set(key, { key, owner_id: obj.owner_id, id: obj.id, access_key: obj.access_key, title: obj.title, duration: obj.duration, msg_id: msg.id, date: msg.date, platform: obj.platform });
         }
         const thumb = bestImageUrl(obj.image ?? obj.first_frame);
-        if (thumb) add({ key: `${key}_thumb`, kind: 'video_thumb', url: thumb, rel: `media/videos/${key}_thumb.${extFromUrl(thumb, 'jpg')}`, msg_id: msg.id });
+        if (thumb) add({ key: `${key}_thumb`, kind: 'video_thumb', url: thumb, rel: `media/videos/${key}_thumb.${extFromUrl(thumb, 'jpg')}`, msg_id: msg.id, date: msg.date });
         return;
       }
       case 'doc': {
@@ -93,7 +94,7 @@ export function collectMedia(messages, opts = {}) {
         const key = `graffiti${obj.owner_id}_${obj.id}`;
         const url = obj.url || bestPhotoUrl(obj.photo);
         if (!url) return;
-        add({ key, kind: 'graffiti', url, rel: `media/other/${key}.${extFromUrl(url, 'png')}`, msg_id: msg.id });
+        add({ key, kind: 'graffiti', url, rel: `media/other/${key}.${extFromUrl(url, 'png')}`, msg_id: msg.id, date: msg.date });
         return;
       }
       case 'gift': {
@@ -189,4 +190,16 @@ export function pickVideoFile(item, maxQuality = 2160) {
     if (files[q]) best = { url: files[q], quality: px };
   }
   return best;
+}
+
+/**
+ * Put the message date in front of the file name (media/photos/2019-03-04_photo1_2.jpg)
+ * so files sort chronologically and carry the date even when copied out of the archive.
+ */
+export function datedRel(rel, date) {
+  if (!date || !rel) return rel;
+  const i = rel.lastIndexOf('/');
+  const name = rel.slice(i + 1);
+  if (/^\d{4}-\d{2}-\d{2}_/.test(name)) return rel;
+  return `${rel.slice(0, i + 1)}${formatDay(date)}_${name}`;
 }

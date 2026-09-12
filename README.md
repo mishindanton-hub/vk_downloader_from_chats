@@ -174,6 +174,10 @@ node bin/vk-archive.js run --no-video           # then photos, voice, docs, stic
 node bin/vk-archive.js run --max-video-quality 720   # then videos
 ```
 
+In offline mode the readable pages for every chat are built first, before any media is
+downloaded, so the archive is browsable within minutes; each chat's page is rebuilt once
+its media is in.
+
 Each run only adds what is missing: chats whose history is already complete are skipped,
 and media that is already on disk is not downloaded again. To re-fetch one chat from
 scratch (for example because new messages arrived), delete its `state.json` and
@@ -208,10 +212,11 @@ vk-archive/
     media-index.json         what was downloaded where, and what failed and why
     state.json               progress bookkeeping
     videos-not-downloaded.txt  links to videos the API gives no file for (feed to yt-dlp)
-    media/photos/photo12345_678.jpg
-    media/videos/video12345_678_720p.mp4
-    media/voice/am12345_678.mp3
-    media/docs/doc12345_678_report.pdf
+    media/photos/2019-03-04_photo12345_678.jpg      file names start with the message date,
+    media/videos/2019-03-04_video12345_678_720p.mp4  and each file's modification time is
+    media/videos/2019-03-04_video12345_678_thumb.jpg set to that date too
+    media/voice/2019-03-04_am12345_678.mp3
+    media/docs/2019-03-04_doc12345_678_report.pdf
     media/stickers/, media/music/, media/other/
   chat_2000000123_Family/    group chats
   group_-9876_Some Public/   conversations with communities

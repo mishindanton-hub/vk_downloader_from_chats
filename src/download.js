@@ -26,6 +26,14 @@ export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed
   const pending = jobs.filter((job) => {
     const rec = index[job.key];
     if (rec?.status === 'ok' && fs.existsSync(path.join(dir, rec.path))) {
+      // Naming scheme changed (date prefix): move the file to where the job now wants it.
+      if (rec.path !== job.rel) {
+        ensureDir(path.dirname(path.join(dir, job.rel)));
+        fs.renameSync(path.join(dir, rec.path), path.join(dir, job.rel));
+        rec.path = job.rel;
+        stampDate(path.join(dir, job.rel), job.date);
+        dirty += 1;
+      }
       stats.skipped += 1;
       return false;
     }
@@ -44,6 +52,7 @@ export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed
     for (const [i, url] of urls.entries()) {
       try {
         const size = await downloadFile(url, abs, { fetchImpl, userAgent });
+        stampDate(abs, job.date);
         index[job.key] = { status: 'ok', path: job.rel, kind: job.kind, size, url, title: job.title, msg_id: job.msg_id, ...(i ? { fallback: i } : {}) };
         stats.done += 1;
         stats.bytes += size;
@@ -73,6 +82,16 @@ export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed
 // VK's image backend answers 424 when it cannot produce that particular size; waiting does not
 // help, but another size of the same photo usually works.
 const NO_RETRY = new Set([424]);
+
+/** Give the file the message's date as its modification time, so Finder/Photos show when it was sent. */
+function stampDate(file, unixSeconds) {
+  if (!unixSeconds) return;
+  try {
+    fs.utimesSync(file, new Date(), new Date(unixSeconds * 1000));
+  } catch {
+    /* not important */
+  }
+}
 
 export class HttpError extends Error {
   constructor(status, url) {
