@@ -57,8 +57,10 @@ paste into VK's page (VK only lets your logged-in browser read messages).
 why instead of failing quietly: macOS opens a page in your browser with the reason and the
 fix, Windows prints it in the black window. The full log is at
 `~/Library/Logs/VK Archive.log` on macOS and `%LOCALAPPDATA%\VK Archive.log` on Windows.
-The usual cause is the security block above; on macOS you can also clear it by pasting this
-into Terminal once (use the folder you unzipped into):
+The usual cause is the security block above. If macOS refuses to let the app start the
+program itself, the app hands it over to a Terminal window instead, which works — keep that
+window open while the archive runs. You can also clear the block by hand on macOS by pasting
+this into Terminal once (use the folder you unzipped into):
 
 ```sh
 xattr -dr com.apple.quarantine "/path/to/VK Archive.app"

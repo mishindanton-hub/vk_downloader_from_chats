@@ -59,7 +59,31 @@ if [ -f "$BIN" ]; then
   log "trying Node.js with the source instead, if there is any"
 fi
 
+# Last resort that we know works: let Terminal start the program. macOS refuses
+# the helper binary in some app-launch contexts but runs the very same file
+# happily when a Terminal window starts it, so hand it over rather than giving
+# up. The window has to stay open, which the script it writes explains.
+terminal_fallback() {
+  [ -f "$BIN" ] || return 1
+  helper="$HOME/Library/Application Support/VK Archive/Start VK Archive.command"
+  mkdir -p "$(dirname "$helper")" 2>/dev/null || return 1
+  {
+    printf '#!/bin/bash\n'
+    printf '# Written by VK Archive.app, because macOS would not let the app start the\n'
+    printf '# program by itself. Nothing else is different.\n'
+    printf 'echo "Starting VK Archive - keep this window open while it works."\n'
+    printf 'echo "When you are done, use the Quit button on the page."\n'
+    printf 'echo\n'
+    printf 'exec "%s" gui\n' "$BIN"
+  } >"$helper" 2>/dev/null || return 1
+  chmod +x "$helper" 2>/dev/null || return 1
+  open -a Terminal "$helper" 2>/dev/null || return 1
+  log "macOS blocked the direct start; handed over to Terminal instead"
+  return 0
+}
+
 blocked_error() {
+  terminal_fallback && exit 0
   show_error "macOS would not run the program inside this app." \
     "$BLOCKED_ERR" \
     "This is Gatekeeper, not a fault in the archive. Open <b>System Settings → Privacy &amp; Security</b>, scroll down to <b>Security</b>, and click <b>Open Anyway</b> next to VK Archive, then open the app again. If there is no such button, open <b>Terminal</b> and paste this line, then open the app again:<br><code>xattr -dr com.apple.quarantine \"$ROOT\"</code><br>Or install Node.js from <a href=\"https://nodejs.org\">nodejs.org</a>, which lets the app run a different way."

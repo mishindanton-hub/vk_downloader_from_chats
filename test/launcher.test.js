@@ -27,14 +27,18 @@ function sandbox(binScript) {
   const stub = path.join(dir, 'stub');
   fs.mkdirSync(stub);
   for (const name of ['open', 'osascript', 'xattr']) {
-    fs.writeFileSync(path.join(stub, name), `#!/bin/bash\necho "${name} $*" >>"$LAUNCH_LOG"\n`, { mode: 0o755 });
+    fs.writeFileSync(
+      path.join(stub, name),
+      `#!/bin/bash\necho "${name} $*" >>"$LAUNCH_LOG"\nexit \${LAUNCH_${name.toUpperCase()}_FAIL:-0}\n`,
+      { mode: 0o755 },
+    );
   }
   const home = path.join(dir, 'home');
   fs.mkdirSync(home);
   return { dir, macos, stub, home };
 }
 
-function run(box) {
+function run(box, extraEnv = {}) {
   const calls = path.join(box.dir, 'calls.txt');
   const res = spawnSync('bash', [path.join(box.macos, 'VK Archive')], {
     encoding: 'utf8',
@@ -44,6 +48,7 @@ function run(box) {
       HOME: box.home,
       TMPDIR: box.dir,
       LAUNCH_LOG: calls,
+      ...extraEnv,
     },
   });
   const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
@@ -72,15 +77,25 @@ test('macOS launcher', { skip: posix ? false : 'POSIX shell only' }, async (t) =
     assert.match(out.calls, /xattr -d com\.apple\.quarantine .*VK Archive/);
   });
 
-  await t.test('explains a program macOS killed, instead of exiting silently', () => {
+  await t.test('hands a blocked program over to Terminal, which does run it', () => {
     const box = sandbox('#!/bin/bash\nkill -9 $$\n');
     const out = run(box);
-    assert.equal(out.status, 1);
+    assert.equal(out.status, 0);
     assert.match(out.log, /exit 137/);
+    assert.match(out.log, /handed over to Terminal/);
+    assert.match(out.calls, /open -a Terminal .*Start VK Archive\.command/);
+    const helper = path.join(box.home, 'Library/Application Support/VK Archive/Start VK Archive.command');
+    assert.match(fs.readFileSync(helper, 'utf8'), /exec ".*vk-archive" gui/);
+    assert.equal(out.page, '');
+  });
+
+  await t.test('explains the block when even Terminal cannot be opened', () => {
+    const box = sandbox('#!/bin/bash\nkill -9 $$\n');
+    const out = run(box, { LAUNCH_OPEN_FAIL: '1' });
+    assert.equal(out.status, 1);
     assert.match(out.page, /Gatekeeper/);
     assert.match(out.page, /xattr -dr com\.apple\.quarantine/);
     assert.match(out.page, /macOS killed it/);
-    assert.match(out.calls, /open .*vk-archive-problem\.html/);
     assert.match(out.calls, /osascript/);
   });
 });

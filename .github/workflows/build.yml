@@ -60,6 +60,14 @@ jobs:
           cp -R "VK Archive.app" "pkg/VK Archive.app"
           cp dist/vk-archive "pkg/VK Archive.app/Contents/MacOS/vk-archive"
           chmod +x "pkg/VK Archive.app/Contents/MacOS/vk-archive" "pkg/VK Archive.app/Contents/MacOS/VK Archive"
+          # Sign the whole bundle, not just the binary inside it. An ad-hoc signed
+          # helper inside an *unsigned* bundle is refused by macOS when the app
+          # launches it (killed instantly, no output), even though the same binary
+          # runs fine from Terminal. Signing the bundle makes its signature cover
+          # the helper, which is what the system checks at launch.
+          codesign --force --sign - "pkg/VK Archive.app/Contents/MacOS/vk-archive"
+          codesign --force --deep --sign - "pkg/VK Archive.app"
+          codesign --verify --deep --strict --verbose=2 "pkg/VK Archive.app"
           cp browser-export.js "pkg/browser-export.js"
           cat > "pkg/READ ME.txt" <<'EOF'
           VK Archive for macOS

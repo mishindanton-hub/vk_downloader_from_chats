@@ -1,6 +1,6 @@
 {
   "name": "vk-chat-archiver",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Offload every VK (vk.com) conversation you have: full message history plus photos, videos, voice messages, documents and stickers, saved locally as JSON + browsable HTML.",
   "type": "module",
   "bin": {
