@@ -148,7 +148,7 @@ $('startExport').onclick = async () => {
   $('copied').classList.remove('hidden');
   await api('/api/export', {});
 };
-$('startDownload').onclick = async () => { try { await api('/api/download', {}); } catch (e) { alert(e.message); } };
+$('startDownload').onclick = async () => { try { await api('/api/download', {}); } catch (e) { alert(/fetch/i.test(e.message) ? 'VK Archive is not running any more (the background service stopped or was quit). Double-click the launcher again; it continues where it stopped.' : e.message); } };
 $('quit').onclick = async () => { if (!confirm('Quit? Downloads in progress stop; running again later continues where it stopped.')) return; await api('/api/quit', {}); document.body.innerHTML = '<main><div class="card"><h2>VK Archive has quit.</h2><p>You can close this tab. Double-click the launcher again any time to continue.</p></div></main>'; };
 
 (async () => {

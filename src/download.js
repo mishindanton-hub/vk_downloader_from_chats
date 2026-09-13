@@ -50,8 +50,23 @@ export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed
       stats.skipped += 1;
       return false;
     }
+    // No usable record but the file is already there (index lost or rebuilt): adopt it.
+    if (rec?.status !== 'ok') {
+      try {
+        const st = fs.statSync(path.join(dir, job.rel));
+        if (st.isFile() && st.size > 0) {
+          index[job.key] = { status: 'ok', path: job.rel, kind: job.kind, size: st.size, url: job.url, title: job.title, msg_id: job.msg_id, adopted: true };
+          dirty += 1;
+          stats.skipped += 1;
+          return false;
+        }
+      } catch {
+        /* not there: download it */
+      }
+    }
     return true;
   });
+  if (dirty) flush();
 
   await mapLimit(pending, concurrency, async (job) => {
     const abs = path.join(dir, job.rel);

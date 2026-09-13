@@ -108,10 +108,16 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
         entry.status = `skipped: ${state.error}`;
         continue;
       }
-      if (!state.history_complete || !fs.existsSync(path.join(dir, 'messages.jsonl'))) {
+      if (!fs.existsSync(path.join(dir, 'messages.jsonl'))) {
         log.warn(`${tag}: no history on disk; skipping (export it in the browser and import again)`);
         entry.status = 'no history';
         continue;
+      }
+      if (!state.history_complete) {
+        // state.json was lost or damaged; the import writes messages.jsonl and state.json together,
+        // so the messages on disk are the complete export. Rebuild the bookkeeping.
+        state = { ...state, peer_id: peer.peer_id, kind: peer.kind, title: peer.title, history_complete: true, source: state.source ?? 'browser', rebuilt: true };
+        writeJson(path.join(dir, 'state.json'), state);
       }
     }
     if (offline) {

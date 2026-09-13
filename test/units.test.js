@@ -8,7 +8,7 @@ import { describeInFlight, downloadAll } from '../src/download.js';
 import { bestPhotoUrl, collectMedia, pickVideoFile } from '../src/attachments.js';
 import { buildAuthUrl, parseTokenInput } from '../src/auth.js';
 import { formatText } from '../src/render.js';
-import { activity, sanitizeName, sleep, startHeartbeat } from '../src/util.js';
+import { activity, readJson, sanitizeName, sleep, startHeartbeat } from '../src/util.js';
 
 describe('auth helpers', () => {
   it('builds a Kate Mobile implicit-flow URL', () => {
@@ -175,6 +175,44 @@ describe('heartbeat', () => {
       activity.clear();
     }
     assert.ok(lines.some((l) => /still working: downloading media for Big chat \[1 file in flight: 2020-01-01_video1_1_720p\.mp4 \d+ B\/30 B\]/.test(l)), lines.join('\n'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('resilience to damaged bookkeeping files', () => {
+  it('readJson sets a corrupt file aside and returns the fallback', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-json-'));
+    const f = path.join(dir, 'state.json');
+    fs.writeFileSync(f, '{"peer_id": 1, "fetch');
+    const orig = console.warn;
+    const warned = [];
+    console.warn = (...a) => warned.push(a.join(' '));
+    try {
+      assert.deepEqual(readJson(f, { fresh: true }), { fresh: true });
+    } finally {
+      console.warn = orig;
+    }
+    assert.ok(!fs.existsSync(f), 'the broken file is moved away');
+    assert.ok(fs.readdirSync(dir).some((n) => n.startsWith('state.json.corrupt-')), 'and kept for inspection');
+    assert.match(warned.join('\n'), /state\.json is not valid JSON/);
+    assert.equal(readJson(path.join(dir, 'missing.json'), 7), 7);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('downloadAll adopts files already on disk when the index is gone, without fetching', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-adopt-'));
+    fs.mkdirSync(path.join(dir, 'media/photos'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'media/photos/2020-01-02_photo1_1.jpg'), 'already here');
+    let fetched = 0;
+    const fetchImpl = async () => { fetched += 1; throw new Error('should not fetch'); };
+    const job = { key: 'photo1_1', kind: 'photo', url: 'http://x/a.jpg', rel: 'media/photos/2020-01-02_photo1_1.jpg', date: 1577923200 };
+    const { index, stats } = await downloadAll([job], { dir, log: { warn() {} }, fetchImpl });
+    assert.equal(fetched, 0);
+    assert.equal(stats.skipped, 1);
+    assert.equal(index.photo1_1.status, 'ok');
+    assert.equal(index.photo1_1.adopted, true);
+    assert.equal(index.photo1_1.size, 12);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'media-index.json'), 'utf8')).photo1_1.status, 'ok', 'index rebuilt on disk');
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

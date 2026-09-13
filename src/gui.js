@@ -61,13 +61,42 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
   };
   const broadcast = (event) => {
     const data = `data: ${JSON.stringify(event)}\n\n`;
-    for (const res of clients) res.write(data);
+    for (const res of clients) {
+      try {
+        res.write(data);
+      } catch {
+        clients.delete(res);
+      }
+    }
   };
   const setState = (patch) => {
     Object.assign(state, patch);
-    broadcast({ type: 'state', state: publicState() });
+    try {
+      broadcast({ type: 'state', state: publicState() });
+    } catch (err) {
+      inner.warn(`could not publish state: ${err.message}`);
+    }
   };
-  const publicState = () => ({ ...state, chats: archivedChatCount(state.out), activity: activity.text, lines: undefined });
+  const publicState = () => {
+    let chats = 0;
+    try {
+      chats = archivedChatCount(state.out);
+    } catch {
+      /* counted as 0 until readable */
+    }
+    return { ...state, chats, activity: activity.text, lines: undefined };
+  };
+
+  // The service must outlive any single hiccup: a dropped browser socket, a bad file,
+  // a rejected promise nobody awaited. Log it and keep serving.
+  process.on('uncaughtException', (err) => {
+    inner.error(`unexpected error (kept running): ${err?.stack ?? err}`);
+    push(`✖ unexpected error: ${err?.message ?? err}`);
+  });
+  process.on('unhandledRejection', (err) => {
+    inner.error(`unexpected error (kept running): ${err?.stack ?? err}`);
+    push(`✖ unexpected error: ${err?.message ?? err}`);
+  });
 
   const inner = baseLog ?? makeLogger(false);
   const log = {
@@ -172,6 +201,7 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
         res.write(`data: ${JSON.stringify({ type: 'state', state: publicState() })}\n\n`);
         clients.add(res);
         req.on('close', () => clients.delete(res));
+        res.on('error', () => clients.delete(res));
         return undefined;
       }
       if (req.method === 'POST' && url.pathname === '/api/settings') {
