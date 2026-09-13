@@ -211,3 +211,30 @@ describe('gui: the archive folder is only ever created on purpose', () => {
     assert.match((await r.json()).error, /"Nope McNope" is not connected/);
   });
 });
+
+/**
+ * iCloud is the one place an archive cannot live: it uploads files as they are
+ * written and evicts them again to save space, and getting them back needs the
+ * space that was missing in the first place.
+ */
+describe('gui: warns about iCloud Drive', () => {
+  it('flags a folder inside iCloud and leaves a plain folder alone', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-icloud-'));
+    process.env.VK_ARCHIVE_CONFIG = path.join(root, 'config.json');
+    const icloud = path.join(root, 'Library/Mobile Documents/com~apple~CloudDocs/Desktop/VK');
+    const gui = await startGui({ out: icloud, downloads: root, open: false, log: silent });
+    try {
+      const s = await (await fetch(`${gui.address}api/state`)).json();
+      assert.match(s.outWarning, /iCloud Drive/);
+      const r = await fetch(`${gui.address}api/settings`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ out: path.join(root, 'plain') }),
+      });
+      assert.equal((await r.json()).outWarning, null);
+    } finally {
+      await gui.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

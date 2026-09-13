@@ -16,6 +16,8 @@ main{max-width:820px;margin:0 auto;padding:18px 16px 60px}
 .card h2{margin:0 0 6px;font-size:16px;display:flex;align-items:center;gap:10px}
 .num{display:inline-flex;width:26px;height:26px;border-radius:50%;background:var(--accent);color:var(--accent-ink);align-items:center;justify-content:center;font-size:14px;font-weight:600}
 .num.done{background:var(--ok)}
+.status.warn{background:#fdf3d8;border:1px solid #e3c67a;color:#6b4e08;border-radius:10px;padding:10px 12px;margin-top:10px}
+@media (prefers-color-scheme:dark){.status.warn{background:#3a2f10;border-color:#6b5a20;color:#f0d99a}}
 .current{margin-top:10px;font-size:13px;color:var(--muted);word-break:break-all}.current b{color:var(--txt)}
 #offline{display:none;background:var(--bad);color:#fff;padding:12px 20px;font-weight:600}
 #offline.show{display:block}#offline span{font-weight:400;opacity:.9}
@@ -54,6 +56,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:20px}
   <div class="row"><button id="chooseOut">Choose folder…</button><button class="secondary" id="reveal">Show in Finder</button></div>
   <div class="row"><input type="text" id="out" spellcheck="false" placeholder="or type a path, e.g. /Volumes/SSD/VK Archive"><button id="saveOut">Use this folder</button></div>
   <div class="current">Saving to: <b id="outNow">—</b> · <i id="outState"></i></div>
+  <div class="status warn hidden" id="outWarn"></div>
   <details style="margin-top:10px"><summary>Downloads folder (where the export files land)</summary>
     <div class="row" style="margin-top:8px"><button class="secondary" id="chooseDl">Choose folder…</button><input type="text" id="dl" spellcheck="false"><button class="secondary" id="saveDl">Use this folder</button></div>
   </details>
@@ -191,6 +194,8 @@ function render() {
   $('n2').classList.toggle('done', s.phase === 'done');
   $('outNow').textContent = s.out || '—';
   $('outState').textContent = s.outExists ? 'ready' : 'not created yet — press "Use this folder"';
+  $('outWarn').textContent = s.outWarning || '';
+  $('outWarn').classList.toggle('hidden', !s.outWarning);
   $('n0').classList.toggle('done', Boolean(s.outExists));
   document.title = busy && s.progress ? `${Math.round((s.progress.index / s.progress.total) * 100)}% · VK Archive` : 'VK Archive';
 }

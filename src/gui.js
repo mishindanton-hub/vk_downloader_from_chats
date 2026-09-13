@@ -91,7 +91,16 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     } catch {
       /* counted as 0 until readable */
     }
-    return { ...state, chats, outExists: fs.existsSync(state.out), activity: activity.text, lines: undefined };
+    return {
+      ...state,
+      chats,
+      outExists: fs.existsSync(state.out),
+      outWarning: iCloudFolder(state.out)
+        ? 'This folder is inside iCloud Drive. iCloud will upload the archive while it is being written and can remove the files again to save space — and getting them back needs free space you may not have. Choose a plain folder in your home folder, or an external drive.'
+        : null,
+      activity: activity.text,
+      lines: undefined,
+    };
   };
 
   // The service must outlive any single hiccup: a dropped browser socket, a bad file,
@@ -337,6 +346,26 @@ function serveArchive(root, rel, req, res) {
   }
   res.writeHead(200, { 'content-type': type, 'content-length': st.size, 'accept-ranges': 'bytes' });
   return fs.createReadStream(abs).pipe(res);
+}
+
+/**
+ * Whether a folder is inside iCloud Drive, whatever it looks like from the
+ * outside: with Desktop & Documents syncing on, ~/Desktop and ~/Documents are
+ * the iCloud copies, and the real path gives them away. iCloud uploads an
+ * archive while it is still being written and then evicts files to save space,
+ * which needs free space to undo — so a big archive there eats itself.
+ */
+function iCloudFolder(dir) {
+  let real = dir;
+  try {
+    // Resolve the deepest part that exists; the folder itself may not yet.
+    let probe = dir;
+    while (!fs.existsSync(probe) && path.dirname(probe) !== probe) probe = path.dirname(probe);
+    real = path.join(fs.realpathSync(probe), path.relative(probe, dir));
+  } catch {
+    /* fall back to the path as typed */
+  }
+  return real.includes('/Library/Mobile Documents/') || real.includes('/com~apple~CloudDocs/');
 }
 
 /**
