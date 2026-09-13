@@ -48,6 +48,7 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     exportDone: false,
     progress: null, // the chat whose media is downloading: { index, total, title, media: {done,failed,skipped,total,bytes,complete} }
     reading: null, // the chat being read/prepared meanwhile: { index, total, title }
+    totals: { files: 0, bytes: 0 }, // the whole run so far, across chats
     speed: 0, // bytes per second over the last few seconds
     settings: {
       maxVideoQuality: Number(cfg.maxVideoQuality ?? flags.maxVideoQuality ?? 2160),
@@ -145,6 +146,8 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
   let watching = false;
   let stopWatch = false;
   let running = false;
+  let doneFiles = 0; // files and bytes from the chats already finished in this run
+  let doneBytes = 0;
 
   async function watch() {
     if (watching) return;
@@ -175,9 +178,11 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     if (running) return;
     running = true;
     stopWatch = true;
-    setState({ phase: 'pages', error: null, result: null, progress: null, reading: null, speed: 0 });
+    setState({ phase: 'pages', error: null, result: null, progress: null, reading: null, speed: 0, totals: { files: 0, bytes: 0 } });
     lastBytes = 0;
     lastAt = Date.now();
+    doneFiles = 0;
+    doneBytes = 0;
     const stopHb = startHeartbeat(log);
     const wake = keepAwake(log);
     try {
@@ -192,9 +197,22 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
           // The loop reads the next chat while the previous one's files are still
           // downloading, so "reading" and "downloading" are two different chats.
           chat: (c) => setState({ reading: c, progress: state.progress ?? { ...c, media: null } }),
+          // Per chat from the archiver; the page also wants the run as a whole,
+          // and the speed meter needs a number that only ever goes up (it used
+          // to be handed each chat's bytes, which restart at zero every chat).
           media: (m) => {
-            noteBytes(m.bytes ?? 0);
-            setState({ progress: { index: m.index, total: m.total, title: m.title, media: m } });
+            const s = m.media;
+            const files = s.done + s.skipped + s.failed;
+            const bytes = doneBytes + s.bytes;
+            noteBytes(bytes);
+            setState({
+              progress: { index: m.index, total: m.total, title: m.title, media: s },
+              totals: { files: doneFiles + files, bytes },
+            });
+            if (s.complete) {
+              doneFiles += files;
+              doneBytes += s.bytes;
+            }
           },
         },
       });

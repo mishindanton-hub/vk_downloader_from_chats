@@ -15,12 +15,21 @@ describe('end-to-end archive against a fake VK', () => {
   let out;
   let api;
   let summary;
+  let mediaEvents;
 
   before(async () => {
     vk = await startFakeVk();
     out = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-archive-test-'));
     api = new VkApi({ token: TOKEN, baseUrl: vk.apiBase, minInterval: 0, log: silent });
-    summary = await runArchive({ api, out, log: silent, flags: { maxVideoQuality: 720 }, concurrency: 3 });
+    mediaEvents = [];
+    summary = await runArchive({
+      api,
+      out,
+      log: silent,
+      flags: { maxVideoQuality: 720 },
+      concurrency: 3,
+      hooks: { media: (m) => mediaEvents.push(m) },
+    });
   });
 
   after(async () => {
@@ -93,6 +102,22 @@ describe('end-to-end archive against a fake VK', () => {
     assert.ok(ok.length >= 57, `expected >= 57 ok files, got ${ok.length}`);
     for (const [, r] of ok) assert.ok(fs.statSync(path.join(dir, r.path)).size > 0);
     assert.equal(fs.readdirSync(path.join(dir, 'media/photos')).filter((f) => f.endsWith('.part')).length, 0);
+  });
+
+  it('reports the chat count and the file count as separate numbers', () => {
+    assert.ok(mediaEvents.length > 0, 'the page is told about media progress');
+    const chats = summary.length;
+    for (const e of mediaEvents) {
+      assert.equal(e.total, chats, 'e.total is how many chats there are');
+      assert.ok(e.index >= 1 && e.index <= chats);
+      const m = e.media;
+      const counted = m.done + m.skipped + m.failed;
+      // The bug this guards: the chat count overwrote the file count, so the
+      // page showed things like "2923/400 files".
+      assert.ok(counted <= m.total, `${counted} files counted of ${m.total} in this chat`);
+    }
+    const last = mediaEvents.filter((e) => e.media.complete);
+    assert.ok(last.length > 0, 'each chat ends with a complete event');
   });
 
   it('records videos it cannot download for yt-dlp', () => {
