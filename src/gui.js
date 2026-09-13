@@ -6,7 +6,7 @@ import path from 'node:path';
 import { runArchive } from './archive.js';
 import { readAsset } from './assets.js';
 import { loadConfig, saveConfig } from './config.js';
-import { activity, ensureDir, formatBytes, makeLogger, readJson, startHeartbeat } from './util.js';
+import { activity, ensureDir, formatBytes, makeLogger, startHeartbeat } from './util.js';
 import { archivedChatCount, watchDownloads } from './watch.js';
 
 const VK_URL = 'https://vk.ru/im';
@@ -91,7 +91,7 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     } catch {
       /* counted as 0 until readable */
     }
-    return { ...state, chats, activity: activity.text, lines: undefined };
+    return { ...state, chats, outExists: fs.existsSync(state.out), activity: activity.text, lines: undefined };
   };
 
   // The service must outlive any single hiccup: a dropped browser socket, a bad file,
@@ -113,8 +113,10 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     error: (...a) => { inner.error(...a); push(`✖ ${a.join(' ')}`); },
   };
 
-  saveConfig({ ...cfg, out: state.out, downloads: state.downloads });
-  ensureDir(state.out);
+  // Nothing is written until the user asks for it: opening the page must not
+  // create a folder, and must not overwrite the remembered one either. A path
+  // recreating itself the moment you delete it is exactly the surprise this
+  // avoids.
 
   // Bytes/second over a short window, so the page can show a real rate.
   let lastBytes = 0;
@@ -150,7 +152,7 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
         onIdle: ({ parts }) => { if (state.parts !== parts) setState({ parts }); },
       });
       setState({ parts, exportDone: done });
-      if (done && !running) await download();
+      if (done) log.info('Export finished. Press "Start download" in step 3 when you are ready — nothing starts on its own.');
     } catch (err) {
       log.error(err.message);
       setState({ phase: 'error', error: err.message });
@@ -239,7 +241,11 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
         if (typeof b.out === 'string' && b.out.trim()) next.out = expand(b.out);
         if (typeof b.downloads === 'string' && b.downloads.trim()) next.downloads = expand(b.downloads);
         if (next.downloads && !fs.existsSync(next.downloads)) return send(400, { error: `Folder not found: ${next.downloads}` });
-        if (next.out) ensureDir(next.out);
+        if (next.out) {
+          const bad = folderProblem(next.out);
+          if (bad) return send(400, { error: bad });
+          ensureDir(next.out);
+        }
         const settings = { ...state.settings };
         if (b.maxVideoQuality !== undefined) settings.maxVideoQuality = clamp(Number(b.maxVideoQuality), 144, 2160, settings.maxVideoQuality);
         if (b.concurrency !== undefined) settings.concurrency = clamp(Number(b.concurrency), 1, 16, settings.concurrency);
@@ -250,7 +256,15 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
         setState(next);
         return send(200, publicState());
       }
+      if (req.method === 'POST' && url.pathname === '/api/choose') {
+        const picked = await chooseFolder(state.out, log);
+        if (picked.error) return send(400, picked);
+        return send(200, picked);
+      }
       if (req.method === 'POST' && url.pathname === '/api/export') {
+        const bad = folderProblem(state.out);
+        if (bad) return send(400, { error: bad });
+        ensureDir(state.out);
         copyToClipboard(script);
         openInBrowser(VK_URL);
         watch();
@@ -261,6 +275,9 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
         return send(200, { ok: true });
       }
       if (req.method === 'POST' && url.pathname === '/api/download') {
+        const bad = folderProblem(state.out);
+        if (bad) return send(400, { error: bad });
+        ensureDir(state.out);
         if (!archivedChatCount(state.out)) return send(400, { error: 'Nothing imported yet. Export the chats from the browser first.' });
         download();
         return send(200, { ok: true });
@@ -285,8 +302,6 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
   const address = `http://127.0.0.1:${server.address().port}/`;
   inner.info(`VK Archive is running at ${address}  (keep this running; close the window when you are done)`);
   if (open) openInBrowser(address);
-  // Pick up export files that are already there / arrive while the page is open.
-  if (!archivedChatCount(state.out) || !Object.values(readJson(path.join(state.out, 'imported-parts.json'), {}) ?? {}).some((t) => t.done)) watch();
   return { address, server, state, close: () => new Promise((r) => server.close(r)) };
 }
 
@@ -322,6 +337,78 @@ function serveArchive(root, rel, req, res) {
   }
   res.writeHead(200, { 'content-type': type, 'content-length': st.size, 'accept-ranges': 'bytes' });
   return fs.createReadStream(abs).pipe(res);
+}
+
+/**
+ * Why a folder cannot be used, in words the user can act on, or null when it is
+ * fine. The common one is an external drive that is not plugged in: creating
+ * the path would silently make a folder inside /Volumes on the internal disk.
+ */
+function folderProblem(dir) {
+  if (fs.existsSync(dir)) {
+    try {
+      fs.accessSync(dir, fs.constants.W_OK);
+    } catch {
+      return `${dir} cannot be written to. Pick another folder, or fix its permissions.`;
+    }
+    return null;
+  }
+  const parent = path.dirname(dir);
+  if (fs.existsSync(parent)) return null; // it will be created on demand
+  const volumes = process.platform === 'darwin' ? '/Volumes' : null;
+  if (volumes && dir.startsWith(`${volumes}/`)) {
+    const drive = dir.split('/')[2];
+    return `The drive "${drive}" is not connected. Plug it in (it should appear in Finder), then press this button again.`;
+  }
+  return `${parent} does not exist, so ${dir} cannot be created. Check the path, or use "Choose folder…".`;
+}
+
+/**
+ * The system's own folder picker, opened by the program that will do the
+ * writing, so what comes back is a real path this process can use. A text field
+ * cannot do that: a typo, or a drive that is not mounted, silently becomes a
+ * new folder somewhere else entirely.
+ */
+function chooseFolder(current, log) {
+  const start = fs.existsSync(current) ? current : os.homedir();
+  let cmd;
+  if (process.platform === 'darwin') {
+    // "tell me to activate" makes osascript itself frontmost, so its dialog lands
+    // in front of the browser instead of behind it — the app has no Dock icon.
+    cmd = ['osascript', '-e', 'tell me to activate',
+      '-e', `POSIX path of (choose folder with prompt "Where should VK Archive save everything?" default location POSIX file ${JSON.stringify(start)})`];
+  } else if (process.platform === 'win32') {
+    cmd = ['powershell', '-NoProfile', '-STA', '-Command',
+      'Add-Type -AssemblyName System.Windows.Forms;' +
+      '$d = New-Object System.Windows.Forms.FolderBrowserDialog;' +
+      '$d.Description = "Where should VK Archive save everything?";' +
+      `$d.SelectedPath = ${JSON.stringify(start)};` +
+      '$d.ShowNewFolderButton = $true;' +
+      'if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }'];
+  } else {
+    cmd = ['zenity', '--file-selection', '--directory', '--title=Where should VK Archive save everything?', `--filename=${start}/`];
+  }
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd[0], cmd.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch {
+      return resolve({ error: 'This computer has no folder chooser available; type the path instead.' });
+    }
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    child.on('error', () => resolve({ error: 'This computer has no folder chooser available; type the path instead.' }));
+    return child.on('close', (code) => {
+      const picked = out.trim();
+      if (picked) return resolve({ path: path.resolve(picked) });
+      // Cancelling is not a failure; anything else is worth reporting.
+      if (/User canceled|cancel/i.test(err) || code === 1) return resolve({ cancelled: true });
+      log?.debug?.(`folder chooser exited with ${code}: ${err.trim()}`);
+      return resolve({ error: 'The folder chooser did not return a folder; type the path instead.' });
+    });
+  });
 }
 
 function clamp(n, lo, hi, fallback) {

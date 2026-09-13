@@ -27,10 +27,11 @@ describe('gui: local page drives export watch, download and serves the archive',
     gui = await startGui({ out, downloads, open: false, flags: { maxVideoQuality: 720 }, log: silent });
     base = gui.address;
 
-    // Nothing there yet: the page reports idle/waiting with zero chats.
+    // Nothing there yet, and nothing running: the page does not start watching,
+    // importing or downloading until the user presses something.
     const s0 = await (await fetch(`${base}api/state`)).json();
     assert.equal(s0.chats, 0);
-    assert.ok(['idle', 'waiting'].includes(s0.phase));
+    assert.equal(s0.phase, 'idle');
 
     // The browser "saves" the export parts into Downloads while the GUI watches.
     const api = async (method, params) => {
@@ -45,14 +46,37 @@ describe('gui: local page drives export watch, download and serves the archive',
     sandbox.globalThis = sandbox;
     await vm.runInNewContext(SCRIPT.replace('chatsPerFile: 10,', 'chatsPerFile: 3,').replace('pauseMs: 350,', 'pauseMs: 0,'), sandbox);
 
-    // Wait for the watcher to import everything and the automatic download to finish.
-    const deadline = Date.now() + 60000;
-    for (;;) {
-      const s = await (await fetch(`${base}api/state`)).json();
-      if (s.phase === 'done' || s.phase === 'error') break;
-      assert.ok(Date.now() < deadline, `timed out in phase ${s.phase}`);
-      await sleep(300);
-    }
+    const post = (p) => fetch(`${base}${p}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const waitFor = async (ok, what) => {
+      const deadline = Date.now() + 60000;
+      for (;;) {
+        const s = await (await fetch(`${base}api/state`)).json();
+        if (ok(s)) return s;
+        assert.ok(Date.now() < deadline, `timed out waiting for ${what} (phase ${s.phase})`);
+        await sleep(300);
+      }
+    };
+
+    // The files are sitting in Downloads: still nothing happens by itself.
+    await sleep(600);
+    const idle = await (await fetch(`${base}api/state`)).json();
+    assert.equal(idle.phase, 'idle');
+    assert.equal(idle.chats, 0);
+
+    // Step 2, pressed by the user: import what the browser saved.
+    await post('api/watch');
+    const imported = await waitFor((s) => s.exportDone || s.phase === 'error', 'the export to be imported');
+    assert.equal(imported.phase !== 'error', true);
+
+    // Importing must not roll straight into downloading.
+    await sleep(800);
+    const held = await (await fetch(`${base}api/state`)).json();
+    assert.equal(held.result, null);
+    assert.ok(['idle', 'waiting'].includes(held.phase), `expected to be waiting for permission, was ${held.phase}`);
+
+    // Step 3, pressed by the user.
+    await post('api/download');
+    await waitFor((s) => s.phase === 'done' || s.phase === 'error', 'the download to finish');
   });
 
   after(async () => {
@@ -125,5 +149,65 @@ describe('gui: local page drives export watch, download and serves the archive',
     assert.equal(bad.status, 400);
     const ok = await fetch(`${base}api/settings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ downloads: gui.state.downloads }) });
     assert.equal(ok.status, 200);
+  });
+});
+
+/**
+ * The folder in step 1 is the setting people get wrong, and getting it wrong
+ * used to be silent: a typo or an unplugged drive became a new folder somewhere
+ * else, and opening the page at all recreated a folder you had just deleted.
+ */
+describe('gui: the archive folder is only ever created on purpose', () => {
+  let root;
+  let gui;
+  let base;
+
+  before(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-gui-folder-'));
+    fs.mkdirSync(path.join(root, 'Downloads'));
+    process.env.VK_ARCHIVE_CONFIG = path.join(root, 'config.json');
+    gui = await startGui({
+      out: path.join(root, 'archive'),
+      downloads: path.join(root, 'Downloads'),
+      open: false,
+      log: silent,
+    });
+    base = gui.address;
+  });
+
+  after(async () => {
+    await gui.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const post = (p, body) => fetch(`${base}${p}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+
+  it('does not create the folder just because the page was opened', async () => {
+    assert.equal(fs.existsSync(path.join(root, 'archive')), false);
+    const s = await (await fetch(`${base}api/state`)).json();
+    assert.equal(s.outExists, false, 'and says so on the page');
+  });
+
+  it('creates it when the user presses "Use this folder"', async () => {
+    const r = await post('api/settings', { out: path.join(root, 'on the ssd') });
+    assert.equal(r.status, 200);
+    assert.equal(fs.existsSync(path.join(root, 'on the ssd')), true);
+    assert.equal((await r.json()).outExists, true);
+  });
+
+  it('refuses a path whose parent does not exist instead of inventing one', async () => {
+    const r = await post('api/settings', { out: path.join(root, 'missing-drive', 'deep', 'archive') });
+    assert.equal(r.status, 400);
+    const { error } = await r.json();
+    assert.match(error, /does not exist|not connected/);
+    assert.equal(fs.existsSync(path.join(root, 'missing-drive')), false);
+    const s = await (await fetch(`${base}api/state`)).json();
+    assert.equal(s.out, path.join(root, 'on the ssd'), 'and keeps the folder that worked');
+  });
+
+  it('names the drive when an external disk is not plugged in', { skip: process.platform !== 'darwin' }, async () => {
+    const r = await post('api/settings', { out: '/Volumes/Nope McNope/VK Archive' });
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, /"Nope McNope" is not connected/);
   });
 });

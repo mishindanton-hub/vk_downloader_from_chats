@@ -72,15 +72,20 @@ Your browser opens the VK Archive page:
 
 ### Use it
 
-1. **Where to save.** Press Save to accept the suggested folder or type another one.
-   Anything already in the folder is continued, never downloaded twice.
+1. **Where to save.** Press **Choose folder…** — the system's own folder window opens
+   (macOS may put it behind the browser for a second), or type a path and press Enter.
+   Nothing is created until you press **Use this folder**, and the page then shows exactly
+   where it is saving. An external drive that is not plugged in is refused by name instead
+   of quietly becoming a folder on your internal disk. Anything already in the folder is
+   continued, never downloaded twice.
 2. **Let your browser read the chats.** Click **Copy the script & open VK**. A VK tab opens;
    log in if needed. Open the browser console on that tab (the page shows the exact keys
    for your browser), paste, press Enter. Leave the tab open: it walks every chat, prints
    `[vk-archive]` progress lines and saves `vk-export-001.json`, `002`, … to Downloads.
    The VK Archive page notices each file by itself and shows how many chats have arrived.
-3. **Download photos, videos and files.** Starts automatically when the browser finishes
-   (or press the button to start with what has arrived). A progress bar shows chat X of N.
+3. **Download photos, videos and files.** Nothing starts on its own: press **Start
+   download** when you are ready (you can start early with what has arrived). A progress
+   bar shows chat X of N.
    This can take hours for a big account. Close the page or quit whenever you like and
    start the app again later: it continues where it stopped.
 4. **Open the chats** and **Messaging statistics** links on the page show the result;
