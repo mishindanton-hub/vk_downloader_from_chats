@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VK Archive</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M16 7v13m0 0l-5-5m5 5l5-5M8 24h16' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 :root{--bg:#f4f5f7;--card:#fff;--txt:#111;--muted:#6b7280;--line:#e5e7eb;--accent:#2a78d6;--accent-ink:#fff;--ok:#1a7f37;--bad:#c0392b;--soft:#eef4fc}
 @media (prefers-color-scheme:dark){:root{--bg:#111318;--card:#1b1e26;--txt:#e5e7eb;--muted:#9aa3b2;--line:#2b303b;--accent:#3987e5;--ok:#3fb950;--bad:#f0655d;--soft:#1e2a3d}}
@@ -15,6 +16,9 @@ main{max-width:820px;margin:0 auto;padding:18px 16px 60px}
 .card h2{margin:0 0 6px;font-size:16px;display:flex;align-items:center;gap:10px}
 .num{display:inline-flex;width:26px;height:26px;border-radius:50%;background:var(--accent);color:var(--accent-ink);align-items:center;justify-content:center;font-size:14px;font-weight:600}
 .num.done{background:var(--ok)}
+#offline{display:none;background:var(--bad);color:#fff;padding:12px 20px;font-weight:600}
+#offline.show{display:block}#offline span{font-weight:400;opacity:.9}
+body.offline button:not(#retry){opacity:.5}
 .card p{margin:6px 0;color:var(--muted)}
 .card p b{color:var(--txt)}
 button{font:inherit;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:var(--accent);color:var(--accent-ink);font-weight:600}
@@ -39,6 +43,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:20px}
 </style>
 </head>
 <body>
+<div id="offline"><span id="offlineText">Not connected to VK Archive — the program is not running.</span> <button id="retry" style="margin-left:10px;padding:6px 12px;background:#fff;color:#c0392b">Try again</button></div>
 <header><div><h1>VK Archive</h1><div class="sub">Save every chat, photo, video and voice message from VK to your computer</div></div></header>
 <main>
 
@@ -128,7 +133,13 @@ $('consoleHint').innerHTML = isSafari
   : `press <span class="kbd">${isMac ? 'Cmd+Option+J' : 'Ctrl+Shift+J'}</span>${isChrome ? '' : ' (Chrome/Edge)'}.`;
 
 async function api(path, body) {
-  const r = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+  let r;
+  try {
+    r = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+  } catch (err) {
+    setOnline(false);
+    throw new Error('VK Archive is not running any more. Start it again; this page reconnects by itself.');
+  }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
@@ -202,13 +213,57 @@ $('startExport').onclick = async () => {
 $('startDownload').onclick = async () => { try { await api('/api/download', {}); } catch (e) { alert(/fetch/i.test(e.message) ? 'VK Archive is not running any more (the background service stopped or was quit). Double-click the launcher again; it continues where it stopped.' : e.message); } };
 $('quit').onclick = async () => { if (!confirm('Quit? Downloads in progress stop; running again later continues where it stopped.')) return; await api('/api/quit', {}); document.body.innerHTML = '<main><div class="card"><h2>VK Archive has quit.</h2><p>You can close this tab. Double-click the launcher again any time to continue.</p></div></main>'; };
 
-(async () => {
-  const s = await api('/api/state');
-  state = s; (s.log || []).forEach(addLog); render();
+// A page whose program has stopped looks identical to a page that is simply
+// idle: every button quietly does nothing. Say so at the top instead, and
+// reconnect by itself as soon as the program is running again. The browser
+// retries a dropped EventSource on its own, so the banner waits a moment
+// before appearing and disappears again when the stream comes back.
+let online = true;
+let offlineTimer = null;
+function setOnline(ok, why) {
+  online = ok;
+  document.body.classList.toggle('offline', !ok);
+  $('offline').classList.toggle('show', !ok);
+  if (!ok) $('offlineText').textContent = why || 'Not connected to VK Archive — the program is not running. Start it again (double-click the launcher); this page reconnects by itself.';
+}
+function goOffline(why) {
+  clearTimeout(offlineTimer);
+  offlineTimer = setTimeout(() => setOnline(false, why), 1200);
+}
+function goOnline() {
+  clearTimeout(offlineTimer);
+  if (!online) refreshState();
+  setOnline(true);
+}
+$('retry').onclick = () => location.reload();
+
+async function refreshState() {
+  try {
+    state = await api('/api/state');
+  } catch {
+    goOffline();
+    return;
+  }
+  $('log').textContent = '';
+  (state.log || []).forEach(addLog);
+  render();
+}
+
+function connect() {
+  refreshState();
   const ev = new EventSource('/api/events');
-  ev.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'state') { state = m.state; render(); } else if (m.type === 'log') addLog(m.line); };
-  ev.onerror = () => { $('exportStatus').innerHTML = 'Connection to VK Archive lost. Was it quit? Double-click the launcher again.'; };
-})();
+  ev.onopen = goOnline;
+  ev.onmessage = (e) => {
+    goOnline();
+    const m = JSON.parse(e.data);
+    if (m.type === 'state') { state = m.state; render(); } else if (m.type === 'log') addLog(m.line);
+  };
+  ev.onerror = () => {
+    goOffline();
+    if (ev.readyState === EventSource.CLOSED) setTimeout(connect, 3000);
+  };
+}
+connect();
 </script>
 </body>
 </html>
