@@ -1,26 +1,96 @@
 #!/bin/bash
 # VK Archive for macOS. Double-click the app: it starts the local VK Archive
-# service in the background and opens the interface in your browser.
-# Runs the bundled standalone binary when present (release download), otherwise
-# Node.js with the source next to the app (repository ZIP).
+# service and opens the interface in your browser.
+#
+# Runs the bundled standalone binary when present (release download); otherwise
+# Node.js with the source next to the app (repository ZIP). Anything that goes
+# wrong is reported in a browser page, because a background app's dialogs can
+# open behind other windows and be missed.
+
 DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$DIR/../../.." && pwd)"
+BIN="$DIR/vk-archive"
 LOG="$HOME/Library/Logs/VK Archive.log"
 mkdir -p "$(dirname "$LOG")"
 export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/local/bin:$PATH"
 
-fail() {
-  osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with title \"VK Archive\" with icon caution" >/dev/null 2>&1
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >>"$LOG"; }
+
+# Show a failure the user cannot miss: a page in their browser, plus a dialog.
+show_error() {
+  title="$1"; detail="$2"; hint="$3"
+  page="${TMPDIR:-/tmp}/vk-archive-problem.html"
+  {
+    printf '<!doctype html><meta charset="utf-8"><title>VK Archive could not start</title>'
+    printf '<style>body{font:15px/1.55 system-ui,-apple-system,sans-serif;max-width:680px;margin:40px auto;padding:0 20px;color:#111}'
+    printf 'h1{font-size:20px}code,pre{background:#f4f5f7;border:1px solid #e5e7eb;border-radius:8px;padding:2px 6px;font-size:13px}'
+    printf 'pre{padding:10px;white-space:pre-wrap;word-break:break-word}@media(prefers-color-scheme:dark){body{background:#111318;color:#e5e7eb}code,pre{background:#1b1e26;border-color:#2b303b}}</style>'
+    printf '<h1>VK Archive could not start</h1><p><b>%s</b></p>' "$title"
+    printf '<p>%s</p>' "$hint"
+    printf '<p>Details:</p><pre>%s</pre>' "$detail"
+    printf '<p>The full log is at <code>%s</code>. Your archive folder is untouched; nothing was lost.</p>' "$LOG"
+  } >"$page" 2>/dev/null
+  open "$page" 2>/dev/null
+  osascript -e 'tell application "System Events" to display dialog "VK Archive could not start. A page with the details just opened in your browser." buttons {"OK"} default button 1 with title "VK Archive" with icon caution' >/dev/null 2>&1 &
+  log "FAILED: $title / $detail"
 }
 
-if [ -x "$DIR/vk-archive" ]; then
-  "$DIR/vk-archive" gui >>"$LOG" 2>&1 || fail "VK Archive stopped unexpectedly. Details are in $LOG"
-  exit 0
+log "launching from $ROOT"
+
+if [ -f "$BIN" ]; then
+  chmod +x "$BIN" 2>/dev/null
+  # A freshly downloaded copy is quarantined; macOS then kills this bundle's own
+  # helper binary without any visible message. Clearing the flag on our own files
+  # is exactly what the "Open Anyway" button does for the app itself.
+  xattr -d com.apple.quarantine "$BIN" 2>/dev/null
+  xattr -d com.apple.quarantine "$DIR/$(basename "$0")" 2>/dev/null
+  err="$("$BIN" --version 2>&1)"
+  code=$?
+  if [ $code -eq 0 ]; then
+    log "using bundled binary ($err)"
+    exec "$BIN" gui >>"$LOG" 2>&1
+  fi
+  # A binary killed by Gatekeeper prints nothing at all, so describe the exit code
+  # too; "Killed: 9" (code 137) is the signature of a blocked program.
+  [ -n "$err" ] || err="the program produced no output and exited with code $code (macOS killed it)"
+  log "bundled binary refused to run: exit $code: $err"
+  BLOCKED=1
+  BLOCKED_ERR="$err"
+  log "trying Node.js with the source instead, if there is any"
 fi
 
+blocked_error() {
+  show_error "macOS would not run the program inside this app." \
+    "$BLOCKED_ERR" \
+    "This is Gatekeeper, not a fault in the archive. Open <b>System Settings → Privacy &amp; Security</b>, scroll down to <b>Security</b>, and click <b>Open Anyway</b> next to VK Archive, then open the app again. If there is no such button, open <b>Terminal</b> and paste this line, then open the app again:<br><code>xattr -dr com.apple.quarantine \"$ROOT\"</code><br>Or install Node.js from <a href=\"https://nodejs.org\">nodejs.org</a>, which lets the app run a different way."
+}
+
 if ! command -v node >/dev/null 2>&1; then
-  fail "VK Archive needs Node.js (free, one-time install). Click OK to open nodejs.org, install the LTS version, then open VK Archive again."
-  open "https://nodejs.org"
+  if [ -n "$BLOCKED" ]; then
+    blocked_error
+    exit 1
+  fi
+  show_error "Node.js is not installed and this copy has no bundled program." \
+    "no vk-archive binary in $DIR, and node was not found on PATH" \
+    "Install the LTS version from <a href=\"https://nodejs.org\">nodejs.org</a> (free, a couple of clicks), then open VK Archive again. Or download the ready-made app from the project's Releases page, which needs nothing installed."
+  open "https://nodejs.org" 2>/dev/null
   exit 1
 fi
-node "$ROOT/bin/vk-archive.js" gui >>"$LOG" 2>&1 || fail "VK Archive stopped unexpectedly. Details are in $LOG"
+
+ENTRY=""
+for candidate in "$ROOT/bin/vk-archive.js" "$DIR/../Resources/bin/vk-archive.js"; do
+  [ -f "$candidate" ] && ENTRY="$candidate" && break
+done
+if [ -z "$ENTRY" ]; then
+  if [ -n "$BLOCKED" ]; then
+    blocked_error
+    exit 1
+  fi
+  show_error "The program files are missing next to the app." \
+    "no bin/vk-archive.js under $ROOT" \
+    "Unzip the whole download and keep <b>VK Archive.app</b> next to the other files, then open it again."
+  exit 1
+fi
+
+log "using node $(node -v) with $ENTRY"
+exec node "$ENTRY" gui >>"$LOG" 2>&1

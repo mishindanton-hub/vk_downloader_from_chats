@@ -40,6 +40,8 @@ Usage:
         Rebuild HTML/JSON/TXT from already-downloaded data, no network needed.
   vk-archive stats [--out DIR]
         Compute messaging statistics (who, how many, when) into stats.html / stats.json.
+  vk-archive --version
+        Print the version of this build and exit (used by the launchers as a self-check).
 
 Without a token (browser route, when VK refuses the token):
   vk-archive browser
@@ -98,10 +100,26 @@ const OPTIONS = {
   'no-open': { type: 'boolean' },
   verbose: { type: 'boolean', short: 'v' },
   help: { type: 'boolean', short: 'h' },
+  version: { type: 'boolean' },
 };
+
+/** Version of this build: injected by the single-executable build, else read from package.json. */
+export function version() {
+  // eslint-disable-next-line no-undef
+  if (typeof __VK_ARCHIVE_VERSION__ !== 'undefined') return __VK_ARCHIVE_VERSION__;
+  try {
+    return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  } catch {
+    return 'dev';
+  }
+}
 
 export async function main(argv) {
   const { values: o, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
+  if (o.version || positionals[0] === 'version') {
+    console.log(`vk-archive ${version()} (node ${process.version}, ${process.platform}-${process.arch})`);
+    return 0;
+  }
   // No command (a double-clicked app or executable) opens the point-and-click interface.
   const cmd = positionals[0] ?? (o.help ? 'help' : 'gui');
   const log = makeLogger(Boolean(o.verbose));

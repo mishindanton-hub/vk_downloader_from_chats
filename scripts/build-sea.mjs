@@ -30,6 +30,7 @@ const blob = path.join(outDir, 'sea.blob');
 const exe = path.join(outDir, exeName);
 
 // 1. bundle
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const esbuild = await import('esbuild');
 await esbuild.build({
   entryPoints: [path.join(root, 'bin/vk-archive.js')],
@@ -39,7 +40,8 @@ await esbuild.build({
   target: `node${major}`,
   outfile: bundle,
   logLevel: 'warning',
-  banner: { js: '// VK Archive single-executable bundle' },
+  define: { __VK_ARCHIVE_VERSION__: JSON.stringify(pkg.version) },
+  banner: { js: `// VK Archive ${pkg.version} single-executable bundle` },
 });
 
 // 2. sea config + blob

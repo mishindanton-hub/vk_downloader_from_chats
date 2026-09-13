@@ -53,6 +53,17 @@ paste into VK's page (VK only lets your logged-in browser read messages).
 - **Windows:** double-click `VK Archive.bat`. If Windows says "Windows protected your PC",
   click **More info** → **Run anyway**. A small minimized window keeps the service running.
 
+**If nothing happens when you open it** (no browser page, no window), the app now tells you
+why instead of failing quietly: macOS opens a page in your browser with the reason and the
+fix, Windows prints it in the black window. The full log is at
+`~/Library/Logs/VK Archive.log` on macOS and `%LOCALAPPDATA%\VK Archive.log` on Windows.
+The usual cause is the security block above; on macOS you can also clear it by pasting this
+into Terminal once (use the folder you unzipped into):
+
+```sh
+xattr -dr com.apple.quarantine "/path/to/VK Archive.app"
+```
+
 Your browser opens the VK Archive page:
 
 ![VK Archive page](docs/gui.png)
