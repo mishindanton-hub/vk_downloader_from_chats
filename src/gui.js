@@ -48,6 +48,13 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     exportDone: false,
     progress: null, // the chat whose media is downloading: { index, total, title, media: {done,failed,skipped,total,bytes,complete} }
     reading: null, // the chat being read/prepared meanwhile: { index, total, title }
+    speed: 0, // bytes per second over the last few seconds
+    settings: {
+      maxVideoQuality: Number(cfg.maxVideoQuality ?? flags.maxVideoQuality ?? 2160),
+      concurrency: Number(cfg.concurrency ?? concurrency),
+      parallel: Number(cfg.parallel ?? 4),
+      noVideo: Boolean(cfg.noVideo ?? flags.noVideo),
+    },
     result: null,
     error: null,
     started_at: Date.now(),
@@ -109,6 +116,20 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
   saveConfig({ ...cfg, out: state.out, downloads: state.downloads });
   ensureDir(state.out);
 
+  // Bytes/second over a short window, so the page can show a real rate.
+  let lastBytes = 0;
+  let lastAt = Date.now();
+  const noteBytes = (bytes) => {
+    const now = Date.now();
+    const dt = (now - lastAt) / 1000;
+    if (dt >= 3) {
+      const delta = bytes - lastBytes;
+      state.speed = delta >= 0 && dt > 0 ? Math.round(delta / dt) : 0;
+      lastBytes = bytes;
+      lastAt = now;
+    }
+  };
+
   // --- background work -------------------------------------------------------
   let watching = false;
   let stopWatch = false;
@@ -143,21 +164,27 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
     if (running) return;
     running = true;
     stopWatch = true;
-    setState({ phase: 'pages', error: null, result: null, progress: null, reading: null });
+    setState({ phase: 'pages', error: null, result: null, progress: null, reading: null, speed: 0 });
+    lastBytes = 0;
+    lastAt = Date.now();
     const stopHb = startHeartbeat(log);
+    const wake = keepAwake(log);
     try {
       const summary = await runArchive({
         api: null,
         out: state.out,
         log,
-        flags: { ...flags, retryFailed: true },
-        concurrency,
+        flags: { ...flags, retryFailed: true, maxVideoQuality: state.settings.maxVideoQuality, noVideo: state.settings.noVideo, parallel: state.settings.parallel },
+        concurrency: state.settings.concurrency,
         hooks: {
           phase: (p) => setState({ phase: p }),
           // The loop reads the next chat while the previous one's files are still
           // downloading, so "reading" and "downloading" are two different chats.
           chat: (c) => setState({ reading: c, progress: state.progress ?? { ...c, media: null } }),
-          media: (m) => setState({ progress: { index: m.index, total: m.total, title: m.title, media: m } }),
+          media: (m) => {
+            noteBytes(m.bytes ?? 0);
+            setState({ progress: { index: m.index, total: m.total, title: m.title, media: m } });
+          },
         },
       });
       const ok = summary.filter((s) => s.status === 'ok').length;
@@ -169,6 +196,8 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
       setState({ phase: 'error', error: err.message });
     } finally {
       stopHb();
+      wake();
+      setState({ speed: 0 });
       running = false;
     }
   }
@@ -211,7 +240,13 @@ export async function startGui({ out: outFlag, downloads: dlFlag, port = 0, open
         if (typeof b.downloads === 'string' && b.downloads.trim()) next.downloads = expand(b.downloads);
         if (next.downloads && !fs.existsSync(next.downloads)) return send(400, { error: `Folder not found: ${next.downloads}` });
         if (next.out) ensureDir(next.out);
-        saveConfig({ ...loadConfig(), ...next });
+        const settings = { ...state.settings };
+        if (b.maxVideoQuality !== undefined) settings.maxVideoQuality = clamp(Number(b.maxVideoQuality), 144, 2160, settings.maxVideoQuality);
+        if (b.concurrency !== undefined) settings.concurrency = clamp(Number(b.concurrency), 1, 16, settings.concurrency);
+        if (b.parallel !== undefined) settings.parallel = clamp(Number(b.parallel), 1, 8, settings.parallel);
+        if (b.noVideo !== undefined) settings.noVideo = Boolean(b.noVideo);
+        next.settings = settings;
+        saveConfig({ ...loadConfig(), ...next, ...settings });
         setState(next);
         return send(200, publicState());
       }
@@ -287,6 +322,33 @@ function serveArchive(root, rel, req, res) {
   }
   res.writeHead(200, { 'content-type': type, 'content-length': st.size, 'accept-ranges': 'bytes' });
   return fs.createReadStream(abs).pipe(res);
+}
+
+function clamp(n, lo, hi, fallback) {
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : fallback;
+}
+
+/**
+ * Stop the computer from sleeping while a long download runs; a sleeping laptop
+ * is the most common reason an overnight archive is not finished in the morning.
+ * macOS: caffeinate. Windows/Linux: nothing to do here, we just tell the user.
+ */
+function keepAwake(log) {
+  if (process.platform !== 'darwin') return () => {};
+  try {
+    const child = spawn('caffeinate', ['-i', '-m', '-w', String(process.pid)], { stdio: 'ignore', detached: false });
+    child.on('error', () => {});
+    log.debug?.('keeping the Mac awake while downloading (caffeinate)');
+    return () => {
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+    };
+  } catch {
+    return () => {};
+  }
 }
 
 function expand(p) {

@@ -76,6 +76,24 @@ Your browser opens the VK Archive page:
 Prefer a terminal? `VK Archive (Terminal).command` on macOS runs the same flow as a
 text conversation, and every step is also a command (see below).
 
+### Speed, space and sleep
+
+- **The download is slower than your internet.** VK limits each connection to roughly
+  0.5-1 MB/s, so videos dominate the total time. VK Archive fetches several files at once
+  and splits files over 16 MB across several byte-range connections, which multiplies the
+  throughput when VK throttles per connection. The page's **Speed settings** change the
+  video quality cap, how many files run at once, and how many connections each big file
+  gets; from the terminal these are `--max-video-quality`, `--concurrency` and `--parallel`.
+  Capping video at 720p is the single biggest saving: roughly a third of the bytes.
+- **Keep the computer awake.** On macOS the app holds off sleep while downloading
+  (`caffeinate`), but a closed lid still stops everything. On Windows set power settings
+  to never sleep while plugged in. Progress is saved continuously, so sleeping only
+  costs time.
+- **Do not put the archive in iCloud Drive** (which includes Desktop and Documents on most
+  Macs). Tens of thousands of small files are uploaded while being written, which is slow
+  and can make a file briefly unreadable mid-run. Use a plain folder in your home directory
+  or an external drive; moving the archive later and pointing the app at it works fine.
+
 ### If something goes wrong
 
 - **The console prints an error instead of `[vk-archive]` lines.** Make sure you are on
@@ -165,7 +183,8 @@ node bin/vk-archive.js run [options]
   --no-video --no-photos --no-docs --no-voice --no-stickers --no-music
   --skip-groups          skip community conversations (newsletters, bots)
   --max-video-quality N  highest mp4 height to download (default 2160, e.g. 720)
-  --concurrency N        parallel downloads (default 4)
+  --concurrency N        files downloaded at the same time (default 4)
+  --parallel N           connections per file over 16 MB (default 4)
   --retry-failed         retry media that previously failed with 403/404
   -v                     verbose logging
 ```

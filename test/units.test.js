@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { VkApi } from '../src/api.js';
-import { describeInFlight, downloadAll } from '../src/download.js';
+import { describeInFlight, downloadAll, downloadFile } from '../src/download.js';
+import { startFakeVk } from './fake-vk.js';
 import { bestPhotoUrl, collectMedia, pickVideoFile } from '../src/attachments.js';
 import { buildAuthUrl, parseTokenInput } from '../src/auth.js';
 import { formatText } from '../src/render.js';
@@ -214,5 +215,56 @@ describe('resilience to damaged bookkeeping files', () => {
     assert.equal(index.photo1_1.size, 12);
     assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'media-index.json'), 'utf8')).photo1_1.status, 'ok', 'index rebuilt on disk');
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('parallel range downloads', () => {
+  const verify = (file) => {
+    const buf = fs.readFileSync(file);
+    assert.equal(buf.length, 3 * 1024 * 1024);
+    for (let i = 0; i < buf.length; i += 4099) assert.equal(buf[i], (i * 7) & 0xff, `byte ${i}`);
+  };
+
+  it('fetches a big file as several ranges and reassembles it byte-exactly', async () => {
+    const vk = await startFakeVk();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-ranges-'));
+    try {
+      const dest = path.join(dir, 'big.bin');
+      let last = null;
+      const size = await downloadFile(`${vk.base}/files/big_video.mp4`, dest, { parallel: 4, splitMin: 1024 * 1024, onBytes: (b, exp) => { last = [b, exp]; } });
+      assert.equal(size, 3 * 1024 * 1024);
+      verify(dest);
+      assert.equal(vk.state.rangeRequests, 4, 'four range requests, one per slice');
+      assert.deepEqual(last, [3 * 1024 * 1024, 3 * 1024 * 1024]);
+    } finally {
+      await vk.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to one stream when the server ignores Range', async () => {
+    const vk = await startFakeVk();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-noranges-'));
+    try {
+      const dest = path.join(dir, 'big.bin');
+      const size = await downloadFile(`${vk.base}/files/big_noranges.mp4`, dest, { parallel: 4, splitMin: 1024 * 1024 });
+      assert.equal(size, 3 * 1024 * 1024);
+      verify(dest);
+    } finally {
+      await vk.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves small files on the single-stream path', async () => {
+    const vk = await startFakeVk();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vk-small-'));
+    try {
+      await downloadFile(`${vk.base}/files/big_small.mp4`, path.join(dir, 's.bin'), { parallel: 4 });
+      assert.equal(vk.state.rangeRequests ?? 0, 0);
+    } finally {
+      await vk.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

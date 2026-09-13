@@ -22,6 +22,7 @@ button.secondary{background:var(--soft);color:var(--txt)}
 button:disabled{opacity:.45;cursor:default}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}
 input[type=text]{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--txt);min-width:280px;flex:1}
+select{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--txt);display:block;margin-top:4px}
 label{font-size:13px;color:var(--muted);display:block;margin-top:8px}
 .status{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--soft);font-size:14px}
 .status.ok{background:rgba(26,127,55,.12)}.status.bad{background:rgba(192,57,43,.12)}
@@ -69,6 +70,38 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:20px}
   <div class="row"><button id="startDownload" disabled>Start / continue download</button></div>
   <div class="status hidden" id="dlStatus"></div>
   <div class="bar hidden" id="bar"><i></i></div>
+  <details id="speedBox">
+    <summary>Speed settings</summary>
+    <p>VK limits the speed of each connection, so videos are the slow part. These apply the next time the download starts or continues.</p>
+    <div class="row">
+      <label style="margin:0">Video quality
+        <select id="setQuality">
+          <option value="2160">Best available</option>
+          <option value="1080">Up to 1080p</option>
+          <option value="720">Up to 720p (about half the size)</option>
+          <option value="480">Up to 480p (fastest)</option>
+          <option value="0">Skip videos entirely</option>
+        </select>
+      </label>
+      <label style="margin:0">Files at once
+        <select id="setConcurrency"><option>2</option><option>4</option><option>6</option><option>8</option><option>12</option></select>
+      </label>
+      <label style="margin:0">Connections per big file
+        <select id="setParallel"><option>1</option><option>2</option><option>4</option><option>6</option><option>8</option></select>
+      </label>
+      <button class="secondary" id="saveSpeed">Save</button>
+    </div>
+    <div class="status hidden" id="speedMsg"></div>
+  </details>
+</section>
+
+<section class="card">
+  <h2>Good to know</h2>
+  <p><b>The download is slower than your internet.</b> VK limits each connection to roughly 0.5-1 MB/s, so a one-hour video can take half an hour on its own. VK Archive already fetches several files at once and splits big videos across several connections. If it is still too slow, lower the video quality in step 3: 720p is usually a third of the size of the original and looks fine on a laptop screen. A big account takes a night or two either way; leave it running and check back.</p>
+  <p><b>Keep the computer awake.</b> On a Mac this page keeps it from sleeping by itself while downloading, but close the lid and everything stops. On Windows set Settings → System → Power to never sleep while plugged in. Progress is saved continuously, so a sleep only costs time, never data.</p>
+  <p><b>Do not put the archive in iCloud Drive.</b> Desktop and Documents are synced by iCloud on most Macs, and a 10-30 GB archive of small files will be uploaded file by file while it is being written, which is slow and can make files briefly unreadable. Pick a plain folder such as one directly in your home folder, or an external drive. Moving the folder later is fine: start the app again and point step 1 at the new place.</p>
+  <p><b>Space.</b> Text and pages are about 1-2 GB for a very active account. Photos, voice messages and documents add a few GB. Videos decide the rest: 5-20 GB is typical, more if you sent long clips. The statistics page counts your photos and videos exactly, so you can estimate before the videos start.</p>
+  <p><b>Nothing is ever downloaded twice.</b> Stop whenever you like. The next run continues, retries only what failed, and leaves finished files alone.</p>
 </section>
 
 <section class="card">
@@ -124,14 +157,20 @@ function render() {
   else if (s.phase === 'media' && s.progress) {
     const p = s.progress; const m = p.media;
     const files = m ? `${m.done + m.failed + m.skipped}/${m.total} files, ${fmtBytes(m.bytes)}${m.complete ? ' · done' : ''}` : 'preparing…';
+    const rate = s.speed ? ` · ${fmtBytes(s.speed)}/s` : '';
     const next = s.reading && s.reading.index > p.index ? `<div style="color:var(--muted);font-size:13px">Next: chat ${s.reading.index}, ${esc(s.reading.title)}</div>` : '';
-    st.innerHTML = `<span class="pulse"></span>Chat ${p.index} of ${p.total}: <b>${esc(p.title)}</b> · ${files}${next}`;
+    st.innerHTML = `<span class="pulse"></span>Chat ${p.index} of ${p.total}: <b>${esc(p.title)}</b> · ${files}${rate}${next}`;
     bar.classList.remove('hidden'); bar.firstElementChild.style.width = `${Math.round((p.index / p.total) * 100)}%`;
   } else if (s.phase === 'media') st.innerHTML = '<span class="pulse"></span>Starting…';
   else if (s.phase === 'stats') st.innerHTML = '<span class="pulse"></span>Almost done: computing messaging statistics…';
   else if (s.phase === 'done' && s.result) { st.classList.add('ok'); st.innerHTML = `<b>Done.</b> ${s.result.chats} chats archived, ${s.result.media} media files saved${s.result.failed ? `, ${s.result.failed} files VK no longer serves` : ''}. <a href="/archive/index.html" target="_blank">Open the archive</a>.`; }
   else if (s.phase === 'error') { st.classList.add('bad'); st.textContent = `Stopped: ${s.error}. Click the button to try again.`; }
   else st.classList.add('hidden');
+  if (s.settings && !settingsTouched) {
+    $('setQuality').value = String(s.settings.noVideo ? 0 : s.settings.maxVideoQuality);
+    $('setConcurrency').value = String(s.settings.concurrency);
+    $('setParallel').value = String(s.settings.parallel);
+  }
   $('n2').classList.toggle('done', s.phase === 'done');
   $('n0').classList.toggle('done', Boolean(s.out));
   document.title = busy && s.progress ? `${Math.round((s.progress.index / s.progress.total) * 100)}% · VK Archive` : 'VK Archive';
@@ -142,6 +181,18 @@ function addLog(line) { const pre = $('log'); pre.textContent += (pre.textConten
 $('saveOut').onclick = async () => { try { state = await api('/api/settings', { out: $('out').value }); msg('Saved.'); render(); } catch (e) { msg(e.message, true); } };
 $('saveDl').onclick = async () => { try { state = await api('/api/settings', { downloads: $('dl').value }); msg('Saved.'); render(); } catch (e) { msg(e.message, true); } };
 $('reveal').onclick = () => api('/api/reveal', {});
+let settingsTouched = false;
+['setQuality', 'setConcurrency', 'setParallel'].forEach((id) => { $(id).onchange = () => { settingsTouched = true; }; });
+$('saveSpeed').onclick = async () => {
+  const q = Number($('setQuality').value);
+  try {
+    state = await api('/api/settings', { maxVideoQuality: q || 720, noVideo: q === 0, concurrency: Number($('setConcurrency').value), parallel: Number($('setParallel').value) });
+    settingsTouched = false;
+    const m = $('speedMsg'); m.textContent = 'Saved. Applies when the download starts or continues.'; m.classList.remove('hidden'); m.classList.add('ok');
+    setTimeout(() => m.classList.add('hidden'), 4000);
+    render();
+  } catch (e) { alert(e.message); }
+};
 function msg(t, bad) { const m = $('folderMsg'); m.textContent = t; m.classList.remove('hidden', 'bad', 'ok'); m.classList.add(bad ? 'bad' : 'ok'); setTimeout(() => m.classList.add('hidden'), 4000); }
 $('startExport').onclick = async () => {
   try { const script = await (await fetch('/api/script')).text(); await navigator.clipboard.writeText(script); } catch { /* server copies too */ }

@@ -96,6 +96,21 @@ export function startFakeVk() {
         res.statusCode = 500;
         return res.end('boom');
       }
+      if (name.startsWith('big_')) {
+        // 3 MB whose byte at offset i is (i * 7) & 0xff, so reassembly can be verified; supports Range.
+        const size = 3 * 1024 * 1024;
+        const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? '');
+        state.rangeRequests = (state.rangeRequests ?? 0) + (range ? 1 : 0);
+        const noRanges = name.includes('noranges');
+        const [start, end] = range && !noRanges ? [Number(range[1]), Math.min(Number(range[2]), size - 1)] : [0, size - 1];
+        const buf = Buffer.alloc(end - start + 1);
+        for (let i = 0; i < buf.length; i += 1) buf[i] = ((start + i) * 7) & 0xff;
+        res.statusCode = range && !noRanges ? 206 : 200;
+        res.setHeader('accept-ranges', 'bytes');
+        res.setHeader('content-length', buf.length);
+        if (res.statusCode === 206) res.setHeader('content-range', `bytes ${start}-${end}/${size}`);
+        return res.end(buf);
+      }
       const body = Buffer.alloc(name.length * 100, name.charCodeAt(0));
       res.setHeader('content-length', body.length);
       return res.end(body);

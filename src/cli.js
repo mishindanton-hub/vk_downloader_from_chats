@@ -7,7 +7,7 @@ import { VkApi } from './api.js';
 import { rerender, runArchive } from './archive.js';
 import { assetPath, readAsset } from './assets.js';
 import { APPS, buildAuthUrl, parseTokenInput } from './auth.js';
-import { CONFIG_FILE, loadConfig, resolveToken, saveConfig } from './config.js';
+import { configFile, loadConfig, resolveToken, saveConfig } from './config.js';
 import { runEasy } from './easy.js';
 import { startGui } from './gui.js';
 import { importExport } from './import.js';
@@ -59,7 +59,8 @@ Options for run:
   --no-stickers          skip stickers          --no-music     skip music files
   --skip-groups          skip conversations with communities (newsletters, bots)
   --max-video-quality N  highest mp4 height to download (default 2160, e.g. 720)
-  --concurrency N        parallel downloads (default 4)
+  --concurrency N        files downloaded at the same time (default 4)
+  --parallel N           connections per big file (default 4; VK throttles each one)
   --retry-failed         retry media that previously failed with 403/404
   --token TOKEN          use this token instead of the stored one (or VK_TOKEN env)
   --api-version V        VK API version (default 5.131)
@@ -80,6 +81,7 @@ const OPTIONS = {
   domain: { type: 'string' },
   'max-video-quality': { type: 'string' },
   concurrency: { type: 'string' },
+  parallel: { type: 'string' },
   'text-only': { type: 'boolean' },
   'no-video': { type: 'boolean' },
   'no-photos': { type: 'boolean' },
@@ -186,6 +188,7 @@ function runFlags(o) {
     skipGroups: o['skip-groups'],
     retryFailed: o['retry-failed'],
     maxVideoQuality: o['max-video-quality'] ? Number(o['max-video-quality']) : undefined,
+    parallel: o.parallel ? Number(o.parallel) : undefined,
   };
 }
 
@@ -292,7 +295,7 @@ async function cmdAuth(o, log) {
   });
   saveConfig(cfg);
   if (savedDomain !== domain) log.info(`\nVK sent you to ${savedDomain}, so the API will be used at api.${savedDomain}.`);
-  log.info(`\nToken saved to ${CONFIG_FILE}. Now run: vk-archive whoami`);
+  log.info(`\nToken saved to ${configFile()}. Now run: vk-archive whoami`);
   return 0;
 }
 

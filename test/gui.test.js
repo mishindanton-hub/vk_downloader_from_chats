@@ -23,7 +23,7 @@ describe('gui: local page drives export watch, download and serves the archive',
     const downloads = path.join(root, 'Downloads');
     const out = path.join(root, 'archive');
     fs.mkdirSync(downloads);
-    process.env.VK_ARCHIVE_CONFIG = path.join(root, 'config.json');
+    process.env.VK_ARCHIVE_CONFIG = path.join(root, 'config.json'); // honoured lazily by config.js
     gui = await startGui({ out, downloads, open: false, flags: { maxVideoQuality: 720 }, log: silent });
     base = gui.address;
 
@@ -75,6 +75,8 @@ describe('gui: local page drives export watch, download and serves the archive',
   it('serves the page, the script and the finished archive', async () => {
     const page = await (await fetch(base)).text();
     assert.match(page, /Let your browser read the chats/);
+    assert.match(page, /Speed settings/);
+    assert.match(page, /Do not put the archive in iCloud Drive/);
     assert.match(await (await fetch(`${base}api/script`)).text(), /vk-archive-export\/1/);
     const index = await fetch(`${base}archive/index.html`);
     assert.equal(index.status, 200);
@@ -102,6 +104,20 @@ describe('gui: local page drives export watch, download and serves the archive',
   it('refuses paths outside the archive folder', async () => {
     const r = await fetch(`${base}archive/..%2F..%2Fconfig.json`);
     assert.ok(r.status === 403 || r.status === 404);
+  });
+
+  it('stores the speed settings and clamps them to sane values', async () => {
+    const post = (body) => fetch(`${base}api/settings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    let st = await post({ maxVideoQuality: 720, concurrency: 8, parallel: 6 });
+    assert.deepEqual(st.settings, { maxVideoQuality: 720, concurrency: 8, parallel: 6, noVideo: false });
+    st = await post({ concurrency: 999, parallel: 0, maxVideoQuality: 1, noVideo: true });
+    assert.equal(st.settings.concurrency, 16, 'clamped to the maximum');
+    assert.equal(st.settings.parallel, 1, 'clamped to the minimum');
+    assert.equal(st.settings.maxVideoQuality, 144);
+    assert.equal(st.settings.noVideo, true);
+    const cfg = JSON.parse(fs.readFileSync(process.env.VK_ARCHIVE_CONFIG, 'utf8'));
+    assert.equal(cfg.parallel, 1, 'remembered for next time');
+    await post({ maxVideoQuality: 2160, concurrency: 4, parallel: 4, noVideo: false });
   });
 
   it('accepts new folder settings and rejects a missing Downloads folder', async () => {

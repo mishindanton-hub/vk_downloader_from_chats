@@ -22,7 +22,7 @@ export function describeInFlight() {
   return `[${inFlight.size} file${inFlight.size > 1 ? 's' : ''} in flight: ${parts.join(', ')}${inFlight.size > 3 ? ', …' : ''}]`;
 }
 
-export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed = false, fetchImpl = globalThis.fetch, onProgress, userAgent, label }) {
+export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed = false, fetchImpl = globalThis.fetch, onProgress, userAgent, label, parallel = 4, splitMin }) {
   const indexPath = path.join(dir, 'media-index.json');
   const index = readJson(indexPath, {}) ?? {};
   const stats = { done: 0, skipped: 0, failed: 0, bytes: 0, total: jobs.length };
@@ -80,7 +80,7 @@ export async function downloadAll(jobs, { dir, concurrency = 4, log, retryFailed
         inFlight.set(job.key, flight);
         let size;
         try {
-          size = await downloadFile(url, abs, { fetchImpl, userAgent, onBytes: (b, exp) => { flight.bytes = b; flight.expected = exp; } });
+          size = await downloadFile(url, abs, { fetchImpl, userAgent, parallel, splitMin, onBytes: (b, exp) => { flight.bytes = b; flight.expected = exp; } });
         } finally {
           inFlight.delete(job.key);
         }
@@ -135,13 +135,13 @@ export class HttpError extends Error {
 }
 
 /** Stream a URL to disk with inactivity timeout and retries. Returns bytes written. */
-export async function downloadFile(url, dest, { fetchImpl = globalThis.fetch, retries = 3, inactivityMs = 60000, userAgent, onBytes } = {}) {
+export async function downloadFile(url, dest, { fetchImpl = globalThis.fetch, retries = 3, inactivityMs = 60000, userAgent, onBytes, parallel = 4, splitMin = 16 * 1024 * 1024 } = {}) {
   ensureDir(path.dirname(dest));
   const part = `${dest}.part`;
   let attempt = 0;
   for (;;) {
     try {
-      const size = await streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onBytes });
+      const size = await streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onBytes, parallel, splitMin });
       fs.renameSync(part, dest);
       return size;
     } catch (err) {
@@ -157,7 +157,7 @@ export async function downloadFile(url, dest, { fetchImpl = globalThis.fetch, re
   }
 }
 
-async function streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onBytes }) {
+async function streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onBytes, parallel = 1, splitMin = Infinity }) {
   const controller = new AbortController();
   let timer = setTimeout(() => controller.abort(), inactivityMs);
   const bump = () => {
@@ -170,6 +170,19 @@ async function streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onB
     const res = await fetchImpl(url, { signal: controller.signal, headers, redirect: 'follow' });
     if (!res.ok) throw new HttpError(res.status, url);
     const expected = Number(res.headers.get('content-length') ?? NaN);
+    // VK's video servers throttle each connection to well under 1 MB/s. A big file that
+    // supports byte ranges is fetched as several ranges at once instead; if the server
+    // turns out not to honour ranges after all, the single-stream path below is used.
+    if (parallel > 1 && Number.isFinite(expected) && expected >= splitMin && /bytes/i.test(res.headers.get('accept-ranges') ?? '')) {
+      clearTimeout(timer);
+      controller.abort();
+      try {
+        return await parallelRanges(url, part, expected, { fetchImpl, inactivityMs, headers, onBytes, parallel, splitMin });
+      } catch (err) {
+        if (!err.rangesUnsupported) throw err;
+        return streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onBytes, parallel: 1 });
+      }
+    }
     const out = fs.createWriteStream(part);
     let written = 0;
     try {
@@ -196,4 +209,57 @@ async function streamToFile(url, part, { fetchImpl, inactivityMs, userAgent, onB
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Fetch [0, size) as `parallel` byte ranges into `part`, each written at its offset.
+ * Throws with rangesUnsupported=true when the server answers 200 instead of 206.
+ */
+async function parallelRanges(url, part, size, { fetchImpl, inactivityMs, headers, onBytes, parallel, splitMin }) {
+  // Slices are at least a quarter of the split threshold (4 MB by default), so a file just
+  // over the threshold still gets all `parallel` connections.
+  const minSlice = Math.max(64 * 1024, Math.floor(splitMin / 4));
+  const chunkCount = Math.max(1, Math.min(parallel, Math.ceil(size / minSlice)));
+  const step = Math.ceil(size / chunkCount);
+  const ranges = [];
+  for (let start = 0; start < size; start += step) ranges.push([start, Math.min(size, start + step) - 1]);
+  const fd = await fs.promises.open(part, 'w');
+  let total = 0;
+  const controller = new AbortController();
+  let timer = setTimeout(() => controller.abort(), inactivityMs);
+  const bump = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), inactivityMs);
+  };
+  try {
+    await Promise.all(
+      ranges.map(async ([start, end]) => {
+        const res = await fetchImpl(url, { signal: controller.signal, headers: { ...headers, range: `bytes=${start}-${end}` }, redirect: 'follow' });
+        if (res.status === 200) {
+          const e = new Error('server ignores Range requests');
+          e.rangesUnsupported = true;
+          controller.abort();
+          throw e;
+        }
+        if (res.status !== 206) throw new HttpError(res.status, url);
+        let pos = start;
+        for await (const chunk of res.body) {
+          bump();
+          await fd.write(chunk, 0, chunk.length, pos);
+          pos += chunk.length;
+          total += chunk.length;
+          onBytes?.(total, size);
+        }
+        if (pos !== end + 1) throw new Error(`range ${start}-${end} truncated at ${pos}`);
+      }),
+    );
+  } catch (err) {
+    if (err.name === 'AbortError' && !controller.signal.reason?.rangesUnsupported) throw new Error(`stalled for ${inactivityMs / 1000}s`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    await fd.close();
+  }
+  if (total !== size) throw new Error(`truncated download: got ${formatBytes(total)} of ${formatBytes(size)}`);
+  return total;
 }

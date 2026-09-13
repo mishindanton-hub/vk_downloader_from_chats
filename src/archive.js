@@ -200,6 +200,7 @@ async function runArchiveInner({ api, out, log, peerFilter, flags = {}, concurre
         log,
         userAgent,
         label: peer.title,
+        parallel: flags.parallel ?? 4,
         retryFailed: flags.retryFailed,
         onProgress: (s) => {
           hooks.media?.({ ...s, title: peer.title, index: i + 1, total });
